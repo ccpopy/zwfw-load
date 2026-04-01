@@ -26,6 +26,7 @@ function createScheduler ({ db, broadcast, getProxyServer, testProxy, loadAdvanc
 
       const batchSize = 5;
       const testResults = { total: proxies.length, success: 0, failed: 0 };
+      const responseTimes = [];
 
       // 获取小时级统计
       const hourlyStats = await db.all(`
@@ -80,6 +81,7 @@ function createScheduler ({ db, broadcast, getProxyServer, testProxy, loadAdvanc
               ['active', result.responseTime, proxy.id]
             );
             testResults.success++;
+            if (result.responseTime != null) responseTimes.push(result.responseTime);
 
             if (oldStatus !== 'active') {
               changes.push({ proxyId: proxy.id, oldStatus, newStatus: 'active' });
@@ -135,7 +137,14 @@ function createScheduler ({ db, broadcast, getProxyServer, testProxy, loadAdvanc
       };
 
       const executionTime = Date.now() - startTime;
-      console.log(`定期测试完成: ${testResults.success}/${proxies.length} 个代理可用，耗时 ${executionTime}ms`);
+      let timingDetail = '';
+      if (responseTimes.length > 0) {
+        const minRt = Math.min(...responseTimes);
+        const maxRt = Math.max(...responseTimes);
+        const avgRt = Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length);
+        timingDetail = `，最快 ${minRt}ms，最慢 ${maxRt}ms，平均 ${avgRt}ms`;
+      }
+      console.log(`定期测试完成: ${testResults.success}/${proxies.length} 个代理可用，耗时 ${executionTime}ms${timingDetail}`);
 
       // 广播完成消息，包含统计数据
       broadcast('periodic_test_completed', {

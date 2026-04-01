@@ -2409,14 +2409,32 @@ async function loadGroupProxyCheckboxes (selectedIds = []) {
     const data = await response.json();
     const proxies = data.proxies || data;
     const container = document.querySelector("#group-proxy-checkboxes");
-    container.innerHTML = proxies.map(p => `
+    container.innerHTML = proxies.map(p => {
+      let statusText, statusClass;
+      if (!p.enabled || p.enabled === 0) {
+        statusText = '未启用';
+        statusClass = 'text-gray-400';
+      } else if (p.status === 'active') {
+        statusText = '在线';
+        statusClass = 'text-green-500';
+      } else if (p.status === 'inactive') {
+        statusText = '离线';
+        statusClass = 'text-red-400';
+      } else if (p.status === 'testing') {
+        statusText = '测试中';
+        statusClass = 'text-yellow-500';
+      } else {
+        statusText = '未知';
+        statusClass = 'text-gray-400';
+      }
+      return `
       <label class="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
         <input type="checkbox" value="${p.id}" class="group-proxy-cb rounded" ${selectedIds.includes(p.id) ? 'checked' : ''} />
         <span class="text-sm">${escapeHtml(p.name)}</span>
         <span class="text-xs text-gray-400">${p.type}://${p.host}:${p.port}</span>
-        <span class="text-xs ml-auto ${p.status === 'active' ? 'text-green-500' : 'text-gray-400'}">${p.status === 'active' ? '在线' : p.status || '未知'}</span>
-      </label>
-    `).join("");
+        <span class="text-xs ml-auto ${statusClass}">${statusText}</span>
+      </label>`;
+    }).join("");
   } catch (e) {
     console.error("加载代理列表失败:", e);
   }
