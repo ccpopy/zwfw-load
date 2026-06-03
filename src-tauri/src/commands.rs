@@ -4,14 +4,16 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::anyhow;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::{
     models::{DnsInput, ProxyGroupInput, ProxyInput},
+    proxy::ProxyServiceStatus,
     proxy_tester,
     state::AppState,
     version,
@@ -64,6 +66,12 @@ impl From<std::num::ParseIntError> for CommandError {
 
 impl From<url::ParseError> for CommandError {
     fn from(error: url::ParseError) -> Self {
+        Self::new(error.to_string())
+    }
+}
+
+impl From<reqwest::Error> for CommandError {
+    fn from(error: reqwest::Error) -> Self {
         Self::new(error.to_string())
     }
 }
@@ -225,6 +233,14 @@ pub async fn test_proxy(state: tauri::State<'_, Arc<AppState>>, id: i64) -> Comm
         }),
     );
     Ok(serde_json::to_value(result)?)
+}
+
+#[tauri::command]
+pub async fn proxy_service_status(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> CommandResult<ProxyServiceStatus> {
+    let state = state.inner().clone();
+    Ok(state.proxy_runtime.service_status().await)
 }
 
 #[tauri::command]
@@ -533,9 +549,11 @@ pub fn version_info() -> CommandResult<Value> {
 pub struct UpdateArtifact {
     file_name: String,
     path: String,
+    download_url: String,
     version: String,
     kind: String,
     is_newer: bool,
+    size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -544,32 +562,45 @@ pub struct UpdateInfo {
     current_version: String,
     app_dir: String,
     release_dir: String,
+    source: String,
     has_update: bool,
     latest: Option<UpdateArtifact>,
     artifacts: Vec<UpdateArtifact>,
 }
 
 #[tauri::command]
-pub fn check_for_updates() -> CommandResult<UpdateInfo> {
-    build_update_info()
+pub async fn check_for_updates() -> CommandResult<UpdateInfo> {
+    build_update_info().await
 }
 
 #[tauri::command]
-pub fn install_update(artifact_path: Option<String>) -> CommandResult<Value> {
-    let info = build_update_info()?;
+pub async fn install_update(artifact_path: Option<String>) -> CommandResult<Value> {
+    let info = build_update_info().await?;
     let app_dir = PathBuf::from(&info.app_dir);
     let release_dir = PathBuf::from(&info.release_dir);
-    let selected_path = artifact_path
-        .map(PathBuf::from)
-        .or_else(|| info.latest.map(|artifact| PathBuf::from(artifact.path)))
+    let selected = artifact_path
+        .and_then(|path| info.artifacts.iter().find(|artifact| artifact.path == path).cloned())
+        .or(info.latest.clone())
         .ok_or_else(|| CommandError::new("没有可安装的更新包"))?;
-    let selected_path = selected_path.canonicalize()?;
-    let release_dir = release_dir.canonicalize()?;
 
-    if !selected_path.starts_with(&release_dir) {
-        return Err(CommandError::new("更新包必须位于 release 目录内"));
+    if !selected.is_newer {
+        return Err(CommandError::new("选中的更新包版本不高于当前版本"));
     }
 
+    fs::create_dir_all(&release_dir)?;
+    let selected_path = release_dir.join(&selected.file_name);
+    download_release_asset(&selected.download_url, &selected_path).await?;
+    launch_update_installer(&selected_path, &app_dir)?;
+
+    Ok(json!({
+        "success": true,
+        "installDir": app_dir,
+        "artifactPath": selected_path,
+        "message": "已下载 GitHub Release 更新包，并启动安装程序，安装目录已指向当前应用所在目录"
+    }))
+}
+
+fn launch_update_installer(selected_path: &Path, app_dir: &Path) -> CommandResult<()> {
     let extension = selected_path
         .extension()
         .and_then(|value| value.to_str())
@@ -610,12 +641,7 @@ pub fn install_update(artifact_path: Option<String>) -> CommandResult<Value> {
         }
     }
 
-    Ok(json!({
-        "success": true,
-        "installDir": app_dir,
-        "artifactPath": selected_path,
-        "message": "已启动更新安装程序，安装目录已指向当前应用所在目录"
-    }))
+    Ok(())
 }
 
 fn ensure_positive(value: i64, field: &str) -> CommandResult<i64> {
@@ -626,7 +652,13 @@ fn ensure_positive(value: i64, field: &str) -> CommandResult<i64> {
     }
 }
 
-fn build_update_info() -> CommandResult<UpdateInfo> {
+async fn build_update_info() -> CommandResult<UpdateInfo> {
+    if cfg!(debug_assertions) {
+        return Err(CommandError::new(
+            "开发环境不允许检查更新；生产环境将从 GitHub Releases 获取更新包",
+        ));
+    }
+
     let app_dir = current_app_dir()?;
     let release_dir = release_dir(&app_dir);
     fs::create_dir_all(&release_dir)?;
@@ -634,7 +666,34 @@ fn build_update_info() -> CommandResult<UpdateInfo> {
     let current_version = version::VERSION.to_string();
     let current = VersionParts::parse(version::VERSION)
         .ok_or_else(|| CommandError::new("当前版本号格式无效"))?;
-    let mut artifacts = scan_update_artifacts(&release_dir, current)?;
+    let release = fetch_latest_release().await?;
+    let release_version_text = release.tag_name.trim_start_matches('v').to_string();
+    let release_version = VersionParts::parse(&release_version_text).ok_or_else(|| {
+        CommandError::new(format!(
+            "GitHub Release 标签不是有效版本号: {}",
+            release.tag_name
+        ))
+    })?;
+
+    let mut artifacts = release
+        .assets
+        .into_iter()
+        .filter_map(|asset| {
+            let kind = artifact_kind_from_name(&asset.name)?;
+            if !is_current_platform_artifact(kind) {
+                return None;
+            }
+            Some(UpdateArtifact {
+                file_name: asset.name,
+                path: asset.browser_download_url.clone(),
+                download_url: asset.browser_download_url,
+                version: release_version_text.clone(),
+                kind: kind.to_string(),
+                is_newer: release_version > current,
+                size: Some(asset.size),
+            })
+        })
+        .collect::<Vec<_>>();
     artifacts.sort_by(|left, right| compare_artifacts(right, left));
     let latest = artifacts.iter().find(|artifact| artifact.is_newer).cloned();
 
@@ -642,6 +701,7 @@ fn build_update_info() -> CommandResult<UpdateInfo> {
         current_version,
         app_dir: app_dir.display().to_string(),
         release_dir: release_dir.display().to_string(),
+        source: "github-releases".to_string(),
         has_update: latest.is_some(),
         latest,
         artifacts,
@@ -657,56 +717,58 @@ fn current_app_dir() -> CommandResult<PathBuf> {
 }
 
 fn release_dir(app_dir: &Path) -> PathBuf {
-    if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| app_dir.to_path_buf())
-            .join("release")
-    } else {
-        app_dir.join("release")
-    }
+    app_dir.join("release")
 }
 
-fn scan_update_artifacts(
-    release_dir: &Path,
-    current: VersionParts,
-) -> CommandResult<Vec<UpdateArtifact>> {
-    let mut artifacts = Vec::new();
-    for entry in fs::read_dir(release_dir)? {
-        let entry = entry?;
-        let metadata = entry.metadata()?;
-        if !metadata.is_file() {
-            continue;
-        }
+async fn fetch_latest_release() -> CommandResult<GithubRelease> {
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(format!("zwfw-load/{}", version::VERSION))
+        .build()?
+        .get("https://api.github.com/repos/ccpopy/zwfw-load/releases/latest")
+        .send()
+        .await?;
 
-        let path = entry.path();
-        let Some(kind) = artifact_kind(&path) else {
-            continue;
-        };
-        let file_name = entry.file_name().to_string_lossy().to_string();
-        let Some((version, parsed)) = extract_version(&file_name) else {
-            continue;
-        };
-
-        artifacts.push(UpdateArtifact {
-            file_name,
-            path: path.display().to_string(),
-            version,
-            kind: kind.to_string(),
-            is_newer: parsed > current,
-        });
+    let status = response.status();
+    if !status.is_success() {
+        return Err(CommandError::new(format!(
+            "GitHub Release 查询失败: HTTP {status}"
+        )));
     }
-    Ok(artifacts)
+
+    Ok(response.json().await?)
 }
 
-fn artifact_kind(path: &Path) -> Option<&'static str> {
-    let file_name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
-    let extension = path.extension()?.to_string_lossy().to_ascii_lowercase();
+async fn download_release_asset(download_url: &str, target_path: &Path) -> CommandResult<()> {
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .user_agent(format!("zwfw-load/{}", version::VERSION))
+        .build()?
+        .get(download_url)
+        .send()
+        .await?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(CommandError::new(format!(
+            "GitHub Release 下载失败: HTTP {status}"
+        )));
+    }
+
+    fs::write(target_path, response.bytes().await?)?;
+    Ok(())
+}
+
+fn artifact_kind_from_name(file_name: &str) -> Option<&'static str> {
+    let lower_name = file_name.to_ascii_lowercase();
+    let extension = Path::new(file_name)
+        .extension()?
+        .to_string_lossy()
+        .to_ascii_lowercase();
 
     match extension.as_str() {
-        "exe" if file_name.contains("portable") => Some("windows-portable"),
-        "exe" if file_name.contains("setup") => Some("windows-nsis"),
+        "exe" if lower_name.contains("portable") => Some("windows-portable"),
+        "exe" if lower_name.contains("setup") => Some("windows-nsis"),
         "exe" => Some("windows-exe"),
         "msi" => Some("windows-msi"),
         "dmg" => Some("macos-dmg"),
@@ -715,6 +777,19 @@ fn artifact_kind(path: &Path) -> Option<&'static str> {
         "appimage" => Some("linux-appimage"),
         _ => None,
     }
+}
+
+fn is_current_platform_artifact(kind: &str) -> bool {
+    if cfg!(target_os = "windows") {
+        return matches!(kind, "windows-nsis" | "windows-msi" | "windows-exe");
+    }
+    if cfg!(target_os = "macos") {
+        return kind == "macos-dmg";
+    }
+    if cfg!(target_os = "linux") {
+        return matches!(kind, "linux-deb" | "linux-rpm" | "linux-appimage");
+    }
+    false
 }
 
 fn compare_artifacts(left: &UpdateArtifact, right: &UpdateArtifact) -> std::cmp::Ordering {
@@ -731,29 +806,8 @@ fn artifact_priority(artifact: &UpdateArtifact) -> i32 {
         "windows-nsis" => 40,
         "windows-msi" => 30,
         "windows-exe" => 20,
-        "windows-portable" => 15,
         _ => 10,
     }
-}
-
-fn extract_version(file_name: &str) -> Option<(String, VersionParts)> {
-    let chars: Vec<char> = file_name.chars().collect();
-    for start in 0..chars.len() {
-        if !chars[start].is_ascii_digit() {
-            continue;
-        }
-
-        let mut end = start;
-        while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.') {
-            end += 1;
-        }
-
-        let candidate: String = chars[start..end].iter().collect();
-        if let Some(version) = VersionParts::parse(&candidate) {
-            return Some((candidate, version));
-        }
-    }
-    None
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -779,4 +833,17 @@ impl VersionParts {
             patch,
         })
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+    size: u64,
 }

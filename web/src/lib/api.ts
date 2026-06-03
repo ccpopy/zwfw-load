@@ -42,6 +42,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (method === "GET" && route.pathname === "/api/proxies") {
     return command<T>("list_proxies")
   }
+  if (method === "GET" && route.pathname === "/api/proxy-service-status") {
+    return command<T>("proxy_service_status")
+  }
   if (method === "POST" && route.pathname === "/api/proxies") {
     return command<T>("create_proxy", { input: body })
   }

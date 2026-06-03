@@ -65,6 +65,12 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Read package version
+        id: package-version
+        shell: bash
+        run: |
+          node -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); console.log('version=' + pkg.version)" >> "$GITHUB_OUTPUT"
+
       - name: Build and upload Tauri bundles
         uses: tauri-apps/tauri-action@v1
         env:
@@ -74,8 +80,33 @@ jobs:
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
           releaseName: zwfw-load ${{ github.ref_name }}
-          releaseBody: 自动构建的跨平台安装包。
-          releaseDraft: true
+          releaseBody: |
+            ## Changes
+
+            - 使用 Rust + Tauri v2 重构桌面应用，降低对 Node.js 打包环境的依赖。
+            - 使用 React、shadcn/ui Teal 主题、lucide-react 和 Recharts 重构前台页面。
+            - 代理请求优先按代理分组域名规则命中；未命中分组时使用全局已启用代理逐个尝试。
+            - 增加代理服务运行状态、代理测试状态、请求日志和图表的 Tauri 事件刷新。
+            - 增加 GitHub Releases 更新检查，开发环境禁止检查更新，生产环境按应用所在目录更新。
+            - 优化高级设置弹窗、测试地址下拉选择、日志分页、DNS 启用/禁用文案和跨平台打包产物。
+          releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+          releaseAssetNamePattern: zwfw-load_${{ steps.package-version.outputs.version }}_[platform]_[arch][setup][ext]
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: zwfw-load-[platform]-[arch]-[bundle]
+
+      - name: Upload Windows portable executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_VERSION: ${{ steps.package-version.outputs.version }}
+        run: |
+          $portable = "src-tauri/target/release/zwfw-load-tauri.exe"
+          if (-not (Test-Path $portable)) {
+            throw "Windows portable executable not found: $portable"
+          }
+          $asset = "zwfw-load_${env:PACKAGE_VERSION}_x64-portable.exe"
+          Copy-Item -Path $portable -Destination $asset -Force
+          gh release upload $env:RELEASE_TAG $asset --clobber

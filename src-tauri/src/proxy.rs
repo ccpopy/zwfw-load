@@ -31,11 +31,22 @@ const ADDR_DOMAIN: u8 = 0x03;
 pub struct ProxyRuntime {
     db: Database,
     events: broadcast::Sender<ServerEvent>,
+    service_status: Arc<RwLock<ProxyServiceStatus>>,
     metrics: Arc<RwLock<HashMap<i64, ProxyMetrics>>>,
     circuit_breakers: Arc<RwLock<HashMap<i64, CircuitBreaker>>>,
     active_connections: Arc<RwLock<HashMap<i64, i64>>>,
     dns_cache: Arc<RwLock<HashMap<String, String>>>,
     round_robin_index: Arc<Mutex<usize>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyServiceStatus {
+    pub state: String,
+    pub running: bool,
+    pub host: String,
+    pub port: u16,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,16 +92,36 @@ struct CircuitBreaker {
 }
 
 impl ProxyRuntime {
-    pub fn new(db: Database, events: broadcast::Sender<ServerEvent>) -> Self {
+    pub fn new(db: Database, events: broadcast::Sender<ServerEvent>, listen_port: u16) -> Self {
         Self {
             db,
             events,
+            service_status: Arc::new(RwLock::new(ProxyServiceStatus {
+                state: "starting".to_string(),
+                running: false,
+                host: "0.0.0.0".to_string(),
+                port: listen_port,
+                error: Some("代理服务正在启动".to_string()),
+            })),
             metrics: Arc::new(RwLock::new(HashMap::new())),
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             active_connections: Arc::new(RwLock::new(HashMap::new())),
             dns_cache: Arc::new(RwLock::new(HashMap::new())),
             round_robin_index: Arc::new(Mutex::new(0)),
         }
+    }
+
+    pub async fn service_status(&self) -> ProxyServiceStatus {
+        self.service_status.read().await.clone()
+    }
+
+    async fn set_service_status(&self, status: ProxyServiceStatus) {
+        *self.service_status.write().await = status.clone();
+        let _ = self.events.send(ServerEvent {
+            event_type: "proxy_service_status_changed".to_string(),
+            data: json!(status),
+            timestamp: now_millis(),
+        });
     }
 
     pub async fn refresh_dns_cache(&self) -> Result<()> {
@@ -217,11 +248,20 @@ impl ProxyRuntime {
         }
 
         let group_key = request.original_host.to_lowercase();
-        if let Some(group_proxy_ids) = self.db.group_proxy_ids(&group_key)? {
-            proxies.retain(|proxy| group_proxy_ids.contains(&proxy.id));
+        if let Some(selection) = self.db.group_proxy_selection(&group_key)? {
+            eprintln!(
+                "代理路由命中: target={group_key}, group={}, pattern={}, default={}, candidates={:?}",
+                selection.group_name,
+                selection.domain_pattern.as_deref().unwrap_or("<default>"),
+                selection.is_default,
+                selection.proxy_ids
+            );
+            proxies.retain(|proxy| selection.proxy_ids.contains(&proxy.id));
             if proxies.is_empty() {
                 return Err(anyhow!("目标 {} 匹配的代理分组没有可用代理", group_key));
             }
+        } else {
+            eprintln!("代理路由未命中分组: target={group_key}, 使用全部已启用代理");
         }
 
         let settings = self.db.settings_map()?;
@@ -324,14 +364,63 @@ impl ProxyRuntime {
 }
 
 pub async fn serve(runtime: Arc<ProxyRuntime>, port: u16) -> Result<()> {
-    runtime.refresh_dns_cache().await?;
-    let listener = TcpListener::bind(("0.0.0.0", port))
-        .await
-        .with_context(|| format!("代理服务无法监听 0.0.0.0:{port}"))?;
+    if let Err(error) = runtime.refresh_dns_cache().await {
+        runtime
+            .set_service_status(ProxyServiceStatus {
+                state: "failed".to_string(),
+                running: false,
+                host: "0.0.0.0".to_string(),
+                port,
+                error: Some(format!("DNS 缓存初始化失败: {error:#}")),
+            })
+            .await;
+        return Err(error);
+    }
+
+    let listener = match TcpListener::bind(("0.0.0.0", port)).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            let message = format!("代理服务无法监听 0.0.0.0:{port}: {error}");
+            runtime
+                .set_service_status(ProxyServiceStatus {
+                    state: "failed".to_string(),
+                    running: false,
+                    host: "0.0.0.0".to_string(),
+                    port,
+                    error: Some(message.clone()),
+                })
+                .await;
+            return Err(anyhow!(message));
+        }
+    };
+
+    runtime
+        .set_service_status(ProxyServiceStatus {
+            state: "running".to_string(),
+            running: true,
+            host: "0.0.0.0".to_string(),
+            port,
+            error: None,
+        })
+        .await;
     println!("混合代理负载均衡服务器运行在 0.0.0.0:{port}（SOCKS5/HTTP）");
 
     loop {
-        let (client, addr) = listener.accept().await?;
+        let (client, addr) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                runtime
+                    .set_service_status(ProxyServiceStatus {
+                        state: "failed".to_string(),
+                        running: false,
+                        host: "0.0.0.0".to_string(),
+                        port,
+                        error: Some(format!("代理服务接收连接失败: {error}")),
+                    })
+                    .await;
+                return Err(error.into());
+            }
+        };
         let runtime = runtime.clone();
         tokio::spawn(async move {
             if let Err(error) = handle_client(runtime, client, addr).await {
@@ -457,16 +546,32 @@ async fn connect_with_fail_fast(
         match attempt {
             Ok(Ok(stream)) => {
                 runtime.record_breaker_success(proxy.id).await;
+                eprintln!(
+                    "代理路由成功: target={}:{}, proxy_id={}, proxy_name={}, proxy_type={}",
+                    request.original_host,
+                    request.port,
+                    proxy.id,
+                    proxy.name,
+                    proxy.proxy_type
+                );
                 return Ok((proxy.id, stream));
             }
             Ok(Err(error)) => {
                 runtime.record_breaker_failure(proxy.id).await;
                 runtime.decrement_active(proxy.id).await;
+                eprintln!(
+                    "代理路由尝试失败: target={}:{}, proxy_id={}, proxy_name={}, error={error}",
+                    request.original_host, request.port, proxy.id, proxy.name
+                );
                 errors.push(format!("{}: {error}", proxy.name));
             }
             Err(_) => {
                 runtime.record_breaker_failure(proxy.id).await;
                 runtime.decrement_active(proxy.id).await;
+                eprintln!(
+                    "代理路由尝试超时: target={}:{}, proxy_id={}, proxy_name={}",
+                    request.original_host, request.port, proxy.id, proxy.name
+                );
                 errors.push(format!("{}: 连接超时", proxy.name));
             }
         }

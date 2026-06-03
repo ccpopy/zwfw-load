@@ -41,7 +41,7 @@ impl AppState {
             .and_then(Value::as_u64)
             .and_then(|value| u16::try_from(value).ok())
             .unwrap_or(5678);
-        let proxy_runtime = Arc::new(ProxyRuntime::new(db.clone(), events.clone()));
+        let proxy_runtime = Arc::new(ProxyRuntime::new(db.clone(), events.clone(), proxy_port));
 
         let runtime_for_proxy = proxy_runtime.clone();
         tauri::async_runtime::spawn(async move {

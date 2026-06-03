@@ -55,6 +55,7 @@ pub fn run() {
             commands::update_proxy_priority,
             commands::update_proxy_priorities,
             commands::test_proxy,
+            commands::proxy_service_status,
             commands::list_proxy_groups,
             commands::create_proxy_group,
             commands::update_proxy_group,

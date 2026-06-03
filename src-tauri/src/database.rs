@@ -20,6 +20,13 @@ pub struct Database {
     db_path: PathBuf,
 }
 
+pub struct ProxyGroupSelection {
+    pub group_name: String,
+    pub domain_pattern: Option<String>,
+    pub is_default: bool,
+    pub proxy_ids: HashSet<i64>,
+}
+
 impl Database {
     pub fn open() -> Result<Self> {
         let data_dir = env::var("DATA_DIR")
@@ -654,10 +661,9 @@ impl Database {
         Ok(())
     }
 
-    pub fn group_proxy_ids(&self, target_host: &str) -> Result<Option<HashSet<i64>>> {
+    pub fn group_proxy_selection(&self, target_host: &str) -> Result<Option<ProxyGroupSelection>> {
         let groups = self.list_proxy_groups()?;
-        let mut default_members = None;
-        let mut best_match: Option<(usize, HashSet<i64>)> = None;
+        let mut best_match: Option<(usize, ProxyGroupSelection)> = None;
         let host = target_host.to_lowercase();
 
         for group in groups.into_iter().filter(|group| group.enabled == 1) {
@@ -669,9 +675,6 @@ impl Database {
             if members.is_empty() {
                 continue;
             }
-            if group.is_default == 1 {
-                default_members = Some(members.clone());
-            }
             for domain in group.domains {
                 if domain_matches(&host, &domain.domain) {
                     let specificity = domain.domain.replace("*", "").len();
@@ -680,13 +683,21 @@ impl Database {
                         .map(|(current, _)| specificity > *current)
                         .unwrap_or(true)
                     {
-                        best_match = Some((specificity, members.clone()));
+                        best_match = Some((
+                            specificity,
+                            ProxyGroupSelection {
+                                group_name: group.name.clone(),
+                                domain_pattern: Some(domain.domain),
+                                is_default: group.is_default == 1,
+                                proxy_ids: members.clone(),
+                            },
+                        ));
                     }
                 }
             }
         }
 
-        Ok(best_match.map(|(_, members)| members).or(default_members))
+        Ok(best_match.map(|(_, selection)| selection))
     }
 
     pub fn log_request(

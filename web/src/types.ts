@@ -1,5 +1,22 @@
 export type ProxyStatus = "active" | "inactive" | "testing" | "unknown"
 
+export type ProxyServiceState = "starting" | "running" | "failed"
+
+export interface ProxyServiceStatus {
+  state: ProxyServiceState
+  running: boolean
+  host: string
+  port: number
+  error?: string | null
+}
+
+export interface TestResult {
+  success: boolean
+  responseTime: number
+  statusCode?: number | null
+  error?: string | null
+}
+
 export interface ProxyRecord {
   id: number
   name: string
@@ -124,15 +141,18 @@ export interface VersionInfo {
 export interface UpdateArtifact {
   fileName: string
   path: string
+  downloadUrl: string
   version: string
   kind: string
   isNewer: boolean
+  size?: number | null
 }
 
 export interface UpdateInfo {
   currentVersion: string
   appDir: string
   releaseDir: string
+  source: string
   hasUpdate: boolean
   latest?: UpdateArtifact | null
   artifacts: UpdateArtifact[]

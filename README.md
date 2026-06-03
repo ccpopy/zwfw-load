@@ -17,13 +17,13 @@
 
 - 代理配置管理：新增、编辑、删除、启用、停用和连通性测试。
 - DNS 映射：按域名覆盖解析结果。
-- 代理分组：按域名规则选择代理组，支持默认分组。
+- 代理分组：按域名规则选择代理组；未命中分组时使用全局已启用代理逐个尝试。
 - 负载设置：支持 `adaptive`、`weighted_round_robin`、`least_connections`、`sticky_host`。
 - 高级配置：代理端口、日志保留、连接池、熔断器、快速失败等运行参数。
 - 系统状态：请求趋势、响应耗时、代理使用排行、目标资源排行。
 - 流量日志：分页查看请求日志，支持清空日志。
 - 实时刷新：通过 Tauri 事件推送代理、DNS、分组和请求日志变化。
-- 检查更新：扫描本地 `release` 目录中的安装包，并在生产环境按应用所在目录启动更新安装。
+- 检查更新：开发环境禁止检查更新；生产环境从 GitHub Releases 获取更新包，并按应用所在目录更新。
 - 主题：shadcn Teal 色系，支持亮色和暗色切换。
 
 ## 目录结构
@@ -137,20 +137,60 @@ release/
 Windows 本地构建还会额外复制一个可直接运行的便携 exe：
 
 ```text
-release/zwfw-load_1.2.2_x64-portable.exe
+release/zwfw-load_2026.6.3_x64-portable.exe
 ```
 
 这个文件主要用于本机验证，可以直接双击运行；正式更新安装仍建议使用 setup 或 msi 安装包。
 
+## 三平台安装和使用
+
+从 GitHub Releases 下载当前版本对应平台的产物。
+
+Windows：
+
+- 便携运行：下载 `zwfw-load_2026.6.3_x64-portable.exe`，放到目标目录后直接双击运行。
+- 安装运行：下载 Windows x64 的 `setup.exe` 或 `.msi` 安装包，按安装向导完成安装。GitHub Release 文件名会使用 `zwfw-load_2026.6.3_windows_*` 前缀。
+- 启动后应用会监听默认代理端口 `5678`，浏览器或系统代理可配置为 `SOCKS5 127.0.0.1:5678` 或 `HTTP 127.0.0.1:5678`。
+
+macOS：
+
+- Intel 芯片下载 `x86_64-apple-darwin` 对应的 `.dmg`。
+- Apple Silicon 芯片下载 `aarch64-apple-darwin` 对应的 `.dmg`。
+- 打开 `.dmg` 后把应用拖入 `Applications`。未签名构建首次打开时可能需要在系统设置的“隐私与安全性”中允许打开。
+- 启动后代理端口同样默认为 `5678`，可在系统网络代理或浏览器代理中配置 `127.0.0.1:5678`。
+
+Linux：
+
+- 优先下载 Linux x64 的 `.AppImage`，赋予执行权限后运行：
+
+```bash
+chmod +x zwfw-load_*_*.AppImage
+./zwfw-load_*_*.AppImage
+```
+
+- Debian/Ubuntu 可下载 `.deb` 后安装：
+
+```bash
+sudo apt install ./zwfw-load_*_amd64.deb
+```
+
+- Fedora/RHEL 系发行版可下载 `.rpm` 后安装：
+
+```bash
+sudo dnf install ./zwfw-load_*_x86_64.rpm
+```
+
+- 启动后代理端口默认为 `5678`，可将应用或系统代理指向 `127.0.0.1:5678`。
+
 ## 检查更新
 
-应用内“检查更新”遵循本地目录策略：
+应用内“检查更新”遵循运行环境策略：
 
-- 开发环境：扫描项目根目录 `release`，即 `F:\project\zwfw-load\release`。
-- 生产环境：扫描可执行文件所在目录下的 `release`。如果应用放在 `F:\zwfw-load`，则扫描 `F:\zwfw-load\release`。
-- 安装更新：Windows 下会启动本地安装包，并把安装目录指向当前应用所在目录，例如 `F:\zwfw-load`。
+- 开发环境：直接返回错误，避免把本地调试产物误当成线上更新。
+- 生产环境：请求 GitHub Releases 最新版本，选择当前平台可用的安装包。
+- 安装更新：Windows 下会启动下载的安装包，并把安装目录指向当前应用所在目录，例如 `F:\zwfw-load`。
 
-更新检查只接受 `release` 目录内的安装包，不会默认安装到系统盘其他位置。
+更新检查不会默认安装到系统盘其他位置；应用放在 `F:\zwfw-load` 时，更新也会以该目录作为安装位置。
 
 ## 发布工作流
 
@@ -173,7 +213,7 @@ v*
 - macOS Apple Silicon
 - macOS Intel
 
-workflow 会创建 draft release，并上传 Tauri bundle 和 workflow artifacts。普通提交不会触发发布。
+workflow 会创建正式 GitHub Release，并上传 Tauri bundle、workflow artifacts 和 Windows 便携 exe。普通提交不会触发发布。
 
 ## 运行端口和配置
 

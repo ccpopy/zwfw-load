@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, readdir, stat } from "node:fs/promises"
+import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises"
 import { basename, extname, join, resolve } from "node:path"
 
 const root = resolve(process.cwd())
@@ -6,16 +6,21 @@ const bundleDir = join(root, "src-tauri", "target", "release", "bundle")
 const portableExe = join(root, "src-tauri", "target", "release", "zwfw-load-tauri.exe")
 const outputDir = join(root, "release")
 const allowedExtensions = new Set([".exe", ".msi", ".dmg", ".deb", ".rpm", ".appimage"])
+const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"))
+const tauriConfig = JSON.parse(await readFile(join(root, "src-tauri", "tauri.conf.json"), "utf8"))
+const bundleVersion = tauriConfig.version
 
 await mkdir(outputDir, { recursive: true })
+await removeExistingReleaseArtifacts(outputDir)
 
-const artifacts = await collectArtifacts(bundleDir)
+const artifacts = (await collectArtifacts(bundleDir)).filter((artifact) =>
+  basename(artifact).includes(`_${bundleVersion}_`)
+)
 for (const artifact of artifacts) {
-  await copyFile(artifact, join(outputDir, basename(artifact)))
+  await copyFile(artifact, join(outputDir, releaseFileName(basename(artifact))))
 }
 
 if (await exists(portableExe)) {
-  const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"))
   const arch = process.arch === "x64" ? "x64" : process.arch
   artifacts.push(portableExe)
   await copyFile(portableExe, join(outputDir, `zwfw-load_${version}_${arch}-portable.exe`))
@@ -43,6 +48,23 @@ async function collectArtifacts(dir) {
     }
   }
   return results
+}
+
+async function removeExistingReleaseArtifacts(dir) {
+  for (const entry of await readdir(dir)) {
+    const path = join(dir, entry)
+    const metadata = await stat(path)
+    if (!metadata.isFile()) {
+      continue
+    }
+    if (entry.startsWith("zwfw-load_") && allowedExtensions.has(extname(entry).toLowerCase())) {
+      await rm(path)
+    }
+  }
+}
+
+function releaseFileName(fileName) {
+  return fileName.replace(`_${bundleVersion}_`, `_${version}_`)
 }
 
 async function exists(path) {
