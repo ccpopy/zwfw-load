@@ -7,6 +7,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -22,6 +25,10 @@ use crate::{
 const GITHUB_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/ccpopy/zwfw-load/releases/latest";
 const GITHUB_TOKEN_ENV: &str = "ZWFW_LOAD_GITHUB_TOKEN";
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+#[cfg(target_os = "windows")]
+const PORTABLE_EXIT_DELAY: Duration = Duration::from_millis(800);
 
 type CommandResult<T> = Result<T, CommandError>;
 
@@ -565,7 +572,8 @@ pub struct UpdateArtifact {
 pub struct UpdateInfo {
     current_version: String,
     app_dir: String,
-    release_dir: String,
+    download_dir: String,
+    install_mode: String,
     source: String,
     has_update: bool,
     latest: Option<UpdateArtifact>,
@@ -581,7 +589,7 @@ pub async fn check_for_updates() -> CommandResult<UpdateInfo> {
 pub async fn install_update(artifact_path: Option<String>) -> CommandResult<Value> {
     let info = build_update_info().await?;
     let app_dir = PathBuf::from(&info.app_dir);
-    let release_dir = PathBuf::from(&info.release_dir);
+    let download_dir = PathBuf::from(&info.download_dir);
     let selected = artifact_path
         .and_then(|path| {
             info.artifacts
@@ -596,35 +604,43 @@ pub async fn install_update(artifact_path: Option<String>) -> CommandResult<Valu
         return Err(CommandError::new("选中的更新包版本不高于当前版本"));
     }
 
-    fs::create_dir_all(&release_dir)?;
-    let selected_path = release_dir.join(&selected.file_name);
+    fs::create_dir_all(&download_dir)?;
+    let selected_path = if selected.kind == "windows-portable" {
+        portable_update_staging_path()?
+    } else {
+        download_dir.join(&selected.file_name)
+    };
+    if selected_path == std::env::current_exe()? {
+        return Err(CommandError::new(
+            "更新包文件名与当前运行程序相同，无法在运行中覆盖自身",
+        ));
+    }
     download_release_asset(&selected.download_url, &selected_path).await?;
-    launch_update_installer(&selected_path, &app_dir)?;
+    launch_update_installer(&selected_path, &app_dir, &selected.kind)?;
+
+    let message = if selected.kind == "windows-portable" {
+        "已下载便携更新包到当前应用目录，应用即将替换并重启"
+    } else {
+        "已下载 GitHub Release 更新包，并启动安装程序，安装目录已指向当前应用所在目录"
+    };
 
     Ok(json!({
         "success": true,
         "installDir": app_dir,
         "artifactPath": selected_path,
-        "message": "已下载 GitHub Release 更新包，并启动安装程序，安装目录已指向当前应用所在目录"
+        "message": message
     }))
 }
 
-fn launch_update_installer(selected_path: &Path, app_dir: &Path) -> CommandResult<()> {
+fn launch_update_installer(selected_path: &Path, app_dir: &Path, kind: &str) -> CommandResult<()> {
     let extension = selected_path
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let file_name = selected_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
 
-    if extension == "exe" && file_name.contains("portable") {
-        return Err(CommandError::new(
-            "便携 exe 只用于本机验证，不能在应用运行中直接覆盖当前程序。请使用 setup/msi 更新包，或关闭应用后手动替换 exe。",
-        ));
+    if kind == "windows-portable" {
+        return launch_portable_update(selected_path, app_dir);
     }
 
     match extension.as_str() {
@@ -653,6 +669,53 @@ fn launch_update_installer(selected_path: &Path, app_dir: &Path) -> CommandResul
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn launch_portable_update(selected_path: &Path, app_dir: &Path) -> CommandResult<()> {
+    let current_exe = std::env::current_exe()?;
+    let restart_command = format!(
+        "ping 127.0.0.1 -n 3 > nul && del /f /q \"{}\" && move /y \"{}\" \"{}\" && start \"\" /D \"{}\" \"{}\"",
+        current_exe.display(),
+        selected_path.display(),
+        current_exe.display(),
+        app_dir.display(),
+        current_exe.display()
+    );
+
+    // The running exe is locked on Windows; the helper replaces it after this process exits.
+    Command::new("cmd")
+        .arg("/C")
+        .arg(restart_command)
+        .current_dir(app_dir)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()?;
+
+    std::thread::spawn(|| {
+        std::thread::sleep(PORTABLE_EXIT_DELAY);
+        std::process::exit(0);
+    });
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn launch_portable_update(selected_path: &Path, _app_dir: &Path) -> CommandResult<()> {
+    Err(CommandError::new(format!(
+        "当前平台暂不支持直接安装便携更新包: {}",
+        selected_path.display()
+    )))
+}
+
+#[cfg(target_os = "windows")]
+fn portable_update_staging_path() -> CommandResult<PathBuf> {
+    let current_exe = std::env::current_exe()?;
+    Ok(current_exe.with_extension("update.exe"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn portable_update_staging_path() -> CommandResult<PathBuf> {
+    Err(CommandError::new("当前平台不支持便携更新包暂存路径"))
+}
+
 fn ensure_positive(value: i64, field: &str) -> CommandResult<i64> {
     if value < 1 {
         Err(CommandError::new(format!("{field}必须是正整数")))
@@ -669,8 +732,8 @@ async fn build_update_info() -> CommandResult<UpdateInfo> {
     }
 
     let app_dir = current_app_dir()?;
-    let release_dir = release_dir(&app_dir);
-    fs::create_dir_all(&release_dir)?;
+    let executable = std::env::current_exe()?;
+    let install_mode = current_install_mode(&executable);
 
     let current_version = version::VERSION.to_string();
     let current = VersionParts::parse(version::VERSION)
@@ -689,7 +752,7 @@ async fn build_update_info() -> CommandResult<UpdateInfo> {
         .into_iter()
         .filter_map(|asset| {
             let kind = artifact_kind_from_name(&asset.name)?;
-            if !is_current_platform_artifact(kind) {
+            if !is_current_platform_artifact(kind, install_mode) {
                 return None;
             }
             Some(UpdateArtifact {
@@ -709,7 +772,8 @@ async fn build_update_info() -> CommandResult<UpdateInfo> {
     Ok(UpdateInfo {
         current_version,
         app_dir: app_dir.display().to_string(),
-        release_dir: release_dir.display().to_string(),
+        download_dir: app_dir.display().to_string(),
+        install_mode: install_mode.to_string(),
         source: "github-releases".to_string(),
         has_update: latest.is_some(),
         latest,
@@ -725,8 +789,18 @@ fn current_app_dir() -> CommandResult<PathBuf> {
         .ok_or_else(|| CommandError::new("无法确定当前应用目录"))
 }
 
-fn release_dir(app_dir: &Path) -> PathBuf {
-    app_dir.join("release")
+fn current_install_mode(executable: &Path) -> &'static str {
+    let file_name = executable
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if cfg!(target_os = "windows") && file_name.contains("portable") {
+        "portable"
+    } else {
+        "installed"
+    }
 }
 
 async fn fetch_latest_release() -> CommandResult<GithubRelease> {
@@ -816,9 +890,13 @@ fn artifact_kind_from_name(file_name: &str) -> Option<&'static str> {
     }
 }
 
-fn is_current_platform_artifact(kind: &str) -> bool {
+fn is_current_platform_artifact(kind: &str, install_mode: &str) -> bool {
     if cfg!(target_os = "windows") {
-        return matches!(kind, "windows-nsis" | "windows-msi" | "windows-exe");
+        return if install_mode == "portable" {
+            kind == "windows-portable"
+        } else {
+            matches!(kind, "windows-nsis" | "windows-msi")
+        };
     }
     if cfg!(target_os = "macos") {
         return kind == "macos-dmg";

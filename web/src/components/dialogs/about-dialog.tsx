@@ -35,6 +35,7 @@ export function AboutDialog({
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [checking, setChecking] = useState(false)
   const [installing, setInstalling] = useState(false)
+  const installModeText = updateInfo?.installMode === "portable" ? "便携版" : "安装包"
 
   async function handleCheck() {
     setChecking(true)
@@ -138,15 +139,21 @@ export function AboutDialog({
                 </FieldDescription>
               </Field>
               <Field>
-                <FieldLabel>安装目录</FieldLabel>
+                <FieldLabel>运行方式</FieldLabel>
+                <FieldDescription>
+                  {installModeText}
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel>更新目标目录</FieldLabel>
                 <FieldDescription className="font-mono break-all">
                   {updateInfo.appDir}
                 </FieldDescription>
               </Field>
               <Field>
-                <FieldLabel>更新包目录</FieldLabel>
+                <FieldLabel>下载保存目录</FieldLabel>
                 <FieldDescription className="font-mono break-all">
-                  {updateInfo.releaseDir}
+                  {updateInfo.downloadDir}
                 </FieldDescription>
               </Field>
               <Field>
@@ -183,7 +190,7 @@ export function AboutDialog({
             disabled={!updateInfo?.latest || installing}
           >
             {installing ? <Loader2 className="animate-spin" /> : <Download />}
-            安装更新
+            {updateInfo?.installMode === "portable" ? "下载并重启" : "安装更新"}
           </Button>
         </DialogFooter>
       </DialogContent>

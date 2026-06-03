@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     env, fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -31,9 +31,11 @@ impl Database {
     pub fn open() -> Result<Self> {
         let data_dir = env::var("DATA_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| default_data_dir());
+            .map(Ok)
+            .unwrap_or_else(|_| default_data_dir())?;
         fs::create_dir_all(&data_dir)
             .with_context(|| format!("创建数据目录失败: {}", data_dir.display()))?;
+        import_initial_database(&data_dir)?;
 
         let db_path = data_dir.join("proxy.db");
         let conn = Connection::open(&db_path)
@@ -833,20 +835,159 @@ impl Database {
     }
 }
 
-fn default_data_dir() -> PathBuf {
+fn default_data_dir() -> Result<PathBuf> {
     if cfg!(debug_assertions) {
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        return Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .map(PathBuf::from)
             .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-            .join("data");
+            .join("data"));
     }
 
-    env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(PathBuf::from))
-        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        .join("data")
+    if is_windows_portable()? {
+        return Ok(current_exe_dir()?.join("data"));
+    }
+
+    platform_data_dir()
+}
+
+fn platform_data_dir() -> Result<PathBuf> {
+    if cfg!(target_os = "windows") {
+        return env::var("APPDATA")
+            .map(|value| PathBuf::from(value).join("zwfw-load"))
+            .with_context(|| "无法确定 Windows 用户数据目录，缺少 APPDATA 环境变量");
+    }
+
+    if cfg!(target_os = "macos") {
+        return env::var("HOME")
+            .map(|value| {
+                PathBuf::from(value)
+                    .join("Library")
+                    .join("Application Support")
+                    .join("zwfw-load")
+            })
+            .with_context(|| "无法确定 macOS 用户数据目录，缺少 HOME 环境变量");
+    }
+
+    if cfg!(target_os = "linux") {
+        if let Ok(value) = env::var("XDG_DATA_HOME") {
+            return Ok(PathBuf::from(value).join("zwfw-load"));
+        }
+        return env::var("HOME")
+            .map(|value| {
+                PathBuf::from(value)
+                    .join(".local")
+                    .join("share")
+                    .join("zwfw-load")
+            })
+            .with_context(|| "无法确定 Linux 用户数据目录，缺少 XDG_DATA_HOME 和 HOME 环境变量");
+    }
+
+    current_exe_dir().map(|path| path.join("data"))
+}
+
+fn is_windows_portable() -> Result<bool> {
+    if !cfg!(target_os = "windows") {
+        return Ok(false);
+    }
+
+    let file_name = env::current_exe()?
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    Ok(file_name.contains("portable"))
+}
+
+fn current_exe_dir() -> Result<PathBuf> {
+    env::current_exe()?
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow!("无法确定当前应用目录"))
+}
+
+fn import_initial_database(data_dir: &Path) -> Result<()> {
+    let target_db = data_dir.join("proxy.db");
+    if target_db.exists() {
+        return Ok(());
+    }
+
+    for source_dir in initial_database_source_dirs()? {
+        let source_db = source_dir.join("proxy.db");
+        if !source_db.exists() || source_db == target_db {
+            continue;
+        }
+
+        fs::copy(&source_db, &target_db).with_context(|| {
+            format!(
+                "导入初始数据库失败: {} -> {}",
+                source_db.display(),
+                target_db.display()
+            )
+        })?;
+        copy_sqlite_sidecar(&source_db, &target_db, "wal")?;
+        copy_sqlite_sidecar(&source_db, &target_db, "shm")?;
+        return Ok(());
+    }
+
+    Ok(())
+}
+
+fn initial_database_source_dirs() -> Result<Vec<PathBuf>> {
+    let mut dirs = Vec::new();
+    let exe_dir = current_exe_dir()?;
+    dirs.push(exe_dir.join("data"));
+
+    if cfg!(target_os = "macos") {
+        if let Some(app_dir) = macos_app_dir(&exe_dir) {
+            dirs.push(app_dir.join("Contents").join("Resources").join("data"));
+            if let Some(parent) = app_dir.parent() {
+                dirs.push(parent.join("data"));
+            }
+        }
+    }
+
+    Ok(dirs)
+}
+
+fn copy_sqlite_sidecar(source_db: &Path, target_db: &Path, suffix: &str) -> Result<()> {
+    let source = sidecar_path(source_db, suffix);
+    if !source.exists() {
+        return Ok(());
+    }
+
+    let target = sidecar_path(target_db, suffix);
+    fs::copy(&source, &target).with_context(|| {
+        format!(
+            "导入 SQLite 附属文件失败: {} -> {}",
+            source.display(),
+            target.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn sidecar_path(db_path: &Path, suffix: &str) -> PathBuf {
+    let mut value = db_path.as_os_str().to_os_string();
+    value.push(format!("-{suffix}"));
+    PathBuf::from(value)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_app_dir(exe_dir: &Path) -> Option<PathBuf> {
+    let mut current = Some(exe_dir);
+    while let Some(path) = current {
+        if path.extension().and_then(|value| value.to_str()) == Some("app") {
+            return Some(path.to_path_buf());
+        }
+        current = path.parent();
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_app_dir(_exe_dir: &Path) -> Option<PathBuf> {
+    None
 }
 
 fn add_column_if_missing(

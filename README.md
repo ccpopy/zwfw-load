@@ -142,7 +142,7 @@ release/
 Windows 本地构建还会额外复制一个可直接运行的便携 exe：
 
 ```text
-release/zwfw-load_2026.6.3+2_x64-portable.exe
+release/zwfw-load_2026.6.3+3_x64-portable.exe
 ```
 
 这个文件主要用于本机验证，可以直接双击运行；正式更新安装仍建议使用 setup 或 msi 安装包。
@@ -153,14 +153,15 @@ release/zwfw-load_2026.6.3+2_x64-portable.exe
 
 Windows：
 
-- 便携运行：下载 `zwfw-load_2026.6.3+2_x64-portable.exe`，放到目标目录后直接双击运行。
-- 安装运行：下载 Windows x64 的 `setup.exe` 或 `.msi` 安装包，按安装向导完成安装。GitHub Release 文件名会使用 `zwfw-load_2026.6.3+2_windows_*` 前缀。
+- 便携运行：下载 `zwfw-load_2026.6.3+3_x64-portable.exe`，放到目标目录后直接双击运行。
+- 安装运行：下载 Windows x64 的 `setup.exe` 或 `.msi` 安装包，按安装向导完成安装。GitHub Release 文件名会使用 `zwfw-load_2026.6.3+3_windows_*` 前缀。
 - 启动后应用会监听默认代理端口 `5678`，浏览器或系统代理可配置为 `SOCKS5 127.0.0.1:5678` 或 `HTTP 127.0.0.1:5678`。
 
 macOS：
 
-- Intel 芯片下载 `x86_64-apple-darwin` 对应的 `.dmg`。
-- Apple Silicon 芯片下载 `aarch64-apple-darwin` 对应的 `.dmg`。
+- Intel 芯片下载 `zwfw-load_2026.6.3+3_darwin_x64.dmg`。
+- Apple Silicon 芯片下载 `zwfw-load_2026.6.3+3_darwin_aarch64.dmg`。
+- `.app.tar.gz` 是同架构的应用包压缩产物，通常优先使用 `.dmg` 安装。
 - 打开 `.dmg` 后把应用拖入 `Applications`。未签名构建首次打开时可能需要在系统设置的“隐私与安全性”中允许打开。
 - 启动后代理端口同样默认为 `5678`，可在系统网络代理或浏览器代理中配置 `127.0.0.1:5678`。
 
@@ -187,15 +188,52 @@ sudo dnf install ./zwfw-load_*_x86_64.rpm
 
 - 启动后代理端口默认为 `5678`，可将应用或系统代理指向 `127.0.0.1:5678`。
 
+## 数据目录和随包配置
+
+应用会把 SQLite 数据库写入稳定的用户数据目录，避免应用移动、安装或拖入 `Applications` 后读取不到原来的配置。`DATA_DIR` 环境变量仍可强制指定数据目录。
+
+默认数据目录：
+
+| 平台 | 默认位置 |
+| --- | --- |
+| 开发环境 | 项目根目录 `data` |
+| Windows 便携版 | exe 所在目录的 `data` |
+| Windows 安装版 | `%APPDATA%\zwfw-load` |
+| macOS | `~/Library/Application Support/zwfw-load` |
+| Linux | `$XDG_DATA_HOME/zwfw-load`，未设置时使用 `~/.local/share/zwfw-load` |
+
+如果给 macOS 用户的 zip 里同时包含 `zwfw-load.app` 和 `data/`，不要只把 `zwfw-load.app` 拖入 `Applications` 后再启动。应用只能看到被复制后的 `.app`，看不到 zip 解压目录里的同级 `data`。
+
+带随包配置的 macOS zip 推荐流程：
+
+1. 解压后保持 `zwfw-load.app` 和 `data/` 在同一个目录。
+2. 先从这个解压目录启动一次 `zwfw-load.app`。
+3. 应用会在用户数据目录还没有 `proxy.db` 时，自动导入同级 `data/proxy.db`。
+4. 确认配置列表显示正常后，再把 `zwfw-load.app` 拖入 `Applications`。
+
+如果已经只把 `.app` 拖入 `Applications`，可以手动复制数据库：
+
+```bash
+mkdir -p "$HOME/Library/Application Support/zwfw-load"
+cp data/proxy.db "$HOME/Library/Application Support/zwfw-load/proxy.db"
+```
+
+自动导入只会在目标目录还没有 `proxy.db` 时执行，避免覆盖用户已有配置。
+
 ## 检查更新
 
 应用内“检查更新”遵循运行环境策略：
 
 - 开发环境：直接返回错误，避免把本地调试产物误当成线上更新。
 - 生产环境：请求 GitHub Releases 最新版本，选择当前平台可用的安装包。
-- 安装更新：Windows 下会启动下载的安装包，并把安装目录指向当前应用所在目录，例如 `F:\zwfw-load`。
+- 安装包运行：Windows 下会启动下载的 setup 或 msi，并把安装目录指向当前应用所在目录，例如 `F:\zwfw-load`。
+- 便携版运行：Windows 下会下载 portable exe 到当前应用目录，退出当前应用后替换原 exe，并重新启动。
 
 更新检查不会默认安装到系统盘其他位置；应用放在 `F:\zwfw-load` 时，更新也会以该目录作为安装位置。
+
+应用内显示的“更新目标目录”和“下载保存目录”都会指向当前应用所在目录。比如便携 exe 放在 `F:\project\zwfw-load\release` 中运行时，更新也会下载到 `F:\project\zwfw-load\release`，不会再放到 `F:\project\zwfw-load\release\release`。
+
+便携 exe 在运行时不能直接覆盖自身，所以更新时会先在同目录写入临时更新文件，应用退出后再替换原 exe 并重启。
 
 如果发布仓库是私有仓库，GitHub 未认证访问会返回 `404`。生产环境需要在启动应用前设置环境变量：
 
@@ -226,14 +264,14 @@ v*
 - macOS Apple Silicon
 - macOS Intel
 
-workflow 会创建正式 GitHub Release，并上传 Tauri bundle、workflow artifacts 和 Windows 便携 exe。普通提交不会触发发布。
+workflow 会创建正式 GitHub Release，并上传 Tauri bundle 和 Windows 便携 exe。普通提交不会触发发布。
 
 ## 运行端口和配置
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PROXY_PORT` | `5678` | 首次初始化代理服务端口 |
-| `DATA_DIR` | 开发为项目根目录 `data`，生产为应用目录 `data` | SQLite 数据目录 |
+| `DATA_DIR` | 未设置 | 强制指定 SQLite 数据目录；未设置时使用上方平台默认数据目录 |
 | `proxy_port` | `5678` | 高级配置中的代理端口，保存于 SQLite |
 | `periodic_test_interval` | `300000` | 定期测试间隔，单位毫秒 |
 | `log_retention_days` | `7` | 请求日志保留天数 |

@@ -151,7 +151,8 @@ export interface UpdateArtifact {
 export interface UpdateInfo {
   currentVersion: string
   appDir: string
-  releaseDir: string
+  downloadDir: string
+  installMode: string
   source: string
   hasUpdate: boolean
   latest?: UpdateArtifact | null
