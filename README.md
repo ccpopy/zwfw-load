@@ -1,6 +1,14 @@
 # zwfw-load
 
-代理负载均衡管理系统。当前版本已从单体 Node.js 服务重构为 Tauri v2 桌面应用：后端核心由 Rust 实现，前端由 React、Vite、TypeScript、shadcn/ui、lucide-react 和 Recharts 构建。旧 Node.js 实现仅作为 legacy 入口保留，用于对照验证。
+![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111111)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)
+![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-Teal-111827)
+![Recharts](https://img.shields.io/badge/Recharts-dashboard-009689)
+
+代理负载均衡管理系统。当前版本是基于 Tauri v2 的桌面应用：后端核心由 Rust 实现，前端由 React、Vite、TypeScript、shadcn/ui、lucide-react 和 Recharts 构建。
 
 ## 项目现状
 
@@ -51,9 +59,6 @@ zwfw-load/
 │   │   ├── styles.css         # Tailwind v4 主题变量
 │   │   └── types.ts           # 前端类型定义
 │   └── vite.config.ts
-├── public/                    # 旧 Node.js 前端静态文件，legacy 保留
-├── src/                       # 旧 Node.js 后端模块，legacy 保留
-├── app.js                     # 旧 Node.js 服务入口，legacy 保留
 ├── .github/workflows/         # GitHub Actions 发布工作流
 ├── package.json
 └── README.md
@@ -137,7 +142,7 @@ release/
 Windows 本地构建还会额外复制一个可直接运行的便携 exe：
 
 ```text
-release/zwfw-load_2026.6.3_x64-portable.exe
+release/zwfw-load_2026.6.3+1_x64-portable.exe
 ```
 
 这个文件主要用于本机验证，可以直接双击运行；正式更新安装仍建议使用 setup 或 msi 安装包。
@@ -148,8 +153,8 @@ release/zwfw-load_2026.6.3_x64-portable.exe
 
 Windows：
 
-- 便携运行：下载 `zwfw-load_2026.6.3_x64-portable.exe`，放到目标目录后直接双击运行。
-- 安装运行：下载 Windows x64 的 `setup.exe` 或 `.msi` 安装包，按安装向导完成安装。GitHub Release 文件名会使用 `zwfw-load_2026.6.3_windows_*` 前缀。
+- 便携运行：下载 `zwfw-load_2026.6.3+1_x64-portable.exe`，放到目标目录后直接双击运行。
+- 安装运行：下载 Windows x64 的 `setup.exe` 或 `.msi` 安装包，按安装向导完成安装。GitHub Release 文件名会使用 `zwfw-load_2026.6.3+1_windows_*` 前缀。
 - 启动后应用会监听默认代理端口 `5678`，浏览器或系统代理可配置为 `SOCKS5 127.0.0.1:5678` 或 `HTTP 127.0.0.1:5678`。
 
 macOS：
@@ -254,16 +259,7 @@ workflow 会创建正式 GitHub Release，并上传 Tauri bundle、workflow arti
 
 Rust 后端启动时会自动创建表，并补齐缺失字段。
 
-## 旧 Node.js 入口
-
-旧实现仍保留在 `app.js`、`src/` 和 `public/` 中，用于对照和兼容验证：
-
-```bash
-npm run legacy:start
-npm run legacy:dev
-```
-
-当前推荐入口是 Tauri：
+当前入口是 Tauri：
 
 ```bash
 npm start

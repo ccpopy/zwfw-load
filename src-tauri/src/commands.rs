@@ -852,11 +852,17 @@ struct VersionParts {
     major: u64,
     minor: u64,
     patch: u64,
+    revision: u64,
 }
 
 impl VersionParts {
     fn parse(value: &str) -> Option<Self> {
-        let core = value.split_once('-').map_or(value, |(core, _)| core);
+        let (version, metadata) = value
+            .split_once('+')
+            .map_or((value, None), |(version, metadata)| {
+                (version, Some(metadata))
+            });
+        let core = version.split_once('-').map_or(version, |(core, _)| core);
         let mut parts = core.split('.');
         let major = parts.next()?.parse().ok()?;
         let minor = parts.next()?.parse().ok()?;
@@ -864,10 +870,15 @@ impl VersionParts {
         if parts.next().is_some() {
             return None;
         }
+        let revision = match metadata {
+            Some(value) => value.parse().ok()?,
+            None => 0,
+        };
         Some(Self {
             major,
             minor,
             patch,
+            revision,
         })
     }
 }

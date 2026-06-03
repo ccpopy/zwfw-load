@@ -167,6 +167,14 @@ web/dist/
 release/*
 !release/.gitkeep
 
+# Local-only historical implementation
+/app.js
+/proxyServer.js
+/public/
+/src/
+/version.js
+/version.txt
+
 # Local automation artifacts
 .playwright-cli/
 .codesign-mcp/
