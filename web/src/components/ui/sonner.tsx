@@ -9,10 +9,11 @@ import {
 } from "lucide-react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
-const Toaster = ({ ...props }: ToasterProps) => {
+const Toaster = ({ style, ...props }: ToasterProps) => {
   return (
     <Sonner
       theme="system"
+      position="top-center"
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
@@ -27,6 +28,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          "--width": "min(356px, calc(100vw - 2rem))",
+          top: "50%",
+          right: "auto",
+          bottom: "auto",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          ...style,
         } as React.CSSProperties
       }
       {...props}
