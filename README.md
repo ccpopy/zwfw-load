@@ -1,403 +1,289 @@
-# 智能代理负载均衡系统
+# zwfw-load
 
-## 项目概述
+代理负载均衡管理系统。当前版本已从单体 Node.js 服务重构为 Tauri v2 桌面应用：后端核心由 Rust 实现，前端由 React、Vite、shadcn/ui 和 lucide-react 构建，旧 Node.js 实现仅作为 legacy 入口保留。
 
-这是一个高性能的代理负载均衡系统，支持多种代理协议（SOCKS4/5、HTTP/HTTPS）和智能负载均衡算法。系统具备连接池管理、熔断器保护、健康检查和实时监控等企业级功能。
+## 项目现状
 
-## 核心特性
+- 桌面壳：Tauri v2
+- 后端服务：Rust、Axum、Tokio、rusqlite
+- 前端界面：React、Vite、TypeScript、shadcn/ui、lucide-react、Recharts
+- 数据存储：SQLite，本地持久化代理、分组、DNS 映射、设置和请求日志
+- 代理协议：HTTP、HTTPS、SOCKS4、SOCKS5
+- 默认管理 API 端口：`3333`
+- 默认代理服务端口：`5678`
 
-### 🚀 负载均衡算法
+Tauri 启动后会同时拉起两个本地服务：管理 API 服务和代理转发服务。前端在 Tauri 环境中通过 `get_service_info` 获取真实端口；浏览器开发模式下默认访问 `http://127.0.0.1:3333`。
 
-- **自适应算法** (`adaptive`)：综合多种指标的智能选择算法
-- **加权轮询** (`weighted_round_robin`)：基于代理性能评分的加权轮询
-- **最少连接** (`least_connections`)：选择当前连接数最少的代理
-- **会话粘滞（按域名）** (`sticky_host`)：同一域名尽量使用同一代理
+## 功能
 
-### 🔧 核心组件
+- 代理配置管理：新增、编辑、删除、启用、停用和连通性测试。
+- DNS 映射：按域名覆盖解析结果。
+- 代理分组：按域名规则选择代理组，支持默认分组。
+- 负载设置：支持 `adaptive`、`weighted_round_robin`、`least_connections`、`sticky_host`。
+- 高级配置：代理端口、日志保留、连接池、熔断器、快速失败等运行参数。
+- 系统状态：请求趋势、响应耗时、代理使用排行、目标资源排行。
+- 流量日志：分页查看请求日志，支持清空日志。
+- 实时刷新：通过 WebSocket 推送代理、DNS、分组和请求日志变化。
+- 主题：shadcn Teal 色系，支持亮色和暗色切换。
 
-- **连接池管理**：高效的连接复用和管理
-- **熔断器保护**：Circuit Breaker模式防止雪崩
-- **健康检查**：定期检测代理可用性
-- **性能监控**：实时统计和性能分析
-- **WebSocket通信**：实时状态推送
+## 目录结构
 
-## 文件结构
-
-```
+```text
 zwfw-load/
-├── app.js                  # Express应用主文件
-├── proxyServer.js         # 代理负载均衡核心逻辑
-├── version.js             # 版本信息管理模块
-├── public/                # 前端静态文件
-├── data/                  # 数据存储目录
-│   └── proxy.db          # SQLite数据库
-├── package.json          # 项目依赖配置
-└── CLAUDE.md             # 本文档
+├── src-tauri/                 # Tauri 和 Rust 后端
+│   ├── src/
+│   │   ├── api.rs             # 管理 API 和 WebSocket
+│   │   ├── database.rs        # SQLite schema、迁移和数据访问
+│   │   ├── proxy.rs           # 代理服务、负载均衡、连接池和熔断器
+│   │   ├── proxy_tester.rs    # 代理连通性测试
+│   │   ├── state.rs           # 应用状态和服务启动参数
+│   │   └── version.rs         # 版本信息
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+├── web/                       # React 前端
+│   ├── src/
+│   │   ├── App.tsx            # 主界面和业务交互
+│   │   ├── components/ui/     # shadcn/ui 组件
+│   │   ├── lib/api.ts         # API 和 WebSocket 地址封装
+│   │   ├── styles.css         # Tailwind v4 主题变量
+│   │   └── types.ts           # 前端类型定义
+│   └── vite.config.ts
+├── public/                    # 旧 Node.js 前端静态文件，legacy 保留
+├── src/                       # 旧 Node.js 后端模块，legacy 保留
+├── app.js                     # 旧 Node.js 服务入口，legacy 保留
+├── .github/workflows/         # GitHub Actions 发布工作流
+├── package.json
+└── README.md
 ```
 
-## 核心代码解析
+## 环境要求
 
-### ProxyLoadBalancer 类
+- Node.js `>= 20`
+- Rust stable
+- Windows：需要 WebView2 Runtime，通常 Windows 10/11 已内置或可由 Tauri 安装流程处理。
+- macOS：需要 Xcode Command Line Tools。
+- Linux：构建 Tauri 需要 WebKitGTK 等系统依赖。
 
-位于 `proxyServer.js`，是系统的核心组件：
-
-#### 主要属性
-
-```javascript
-class ProxyLoadBalancer {
-  constructor(db, logRequest) {
-    this.db = db; // 数据库连接
-    this.loadMode = "auto"; // 负载模式
-    this.circuitBreakers = new Map(); // 熔断器集合
-    this.connectionPool = new ConnectionPool(); // 连接池
-    this.algorithms = {
-      // 算法映射
-      adaptive: this.adaptiveSelection.bind(this),
-      weighted_round_robin: this.weightedRoundRobin.bind(this),
-      least_connections: this.leastConnections.bind(this),
-      sticky_host: this.stickyHostSelection.bind(this),
-    };
-  }
-}
-```
-
-### 连接池管理
-
-```javascript
-class ConnectionPool {
-  async getConnection(proxyId, createFn) {
-    // 复用现有连接或创建新连接
-    // 支持连接数限制和空闲超时
-  }
-
-  releaseConnection(conn) {
-    // 释放连接回池中
-  }
-}
-```
-
-### 熔断器保护
-
-```javascript
-class CircuitBreaker {
-  constructor(threshold = 5, timeout = 60000, halfOpenAttempts = 2) {
-    this.state = "CLOSED"; // CLOSED, OPEN, HALF_OPEN
-  }
-
-  canAttempt() {
-    // 判断是否可以尝试连接
-  }
-
-  recordSuccess() {
-    // 记录成功，可能关闭熔断器
-  }
-
-  recordFailure() {
-    // 记录失败，可能打开熔断器
-  }
-}
-```
-
-## API 接口
-
-### 代理管理
-
-```http
-GET    /api/proxies           # 获取所有代理
-POST   /api/proxies           # 创建新代理
-PUT    /api/proxies/:id       # 更新代理
-DELETE /api/proxies/:id       # 删除代理
-POST   /api/proxies/:id/test  # 测试代理
-```
-
-### 设置管理
-
-```http
-GET    /api/settings          # 获取系统设置
-POST   /api/settings          # 更新系统设置
-```
-
-### 统计监控
-
-```http
-GET    /api/stats/overview           # 系统概览
-GET    /api/stats/hourly             # 小时统计
-GET    /api/stats/proxy-usage        # 代理使用统计
-GET    /api/stats/circuit-breakers   # 熔断器状态
-GET    /api/stats/connection-pools   # 连接池状态
-```
-
-### 高级配置
-
-```http
-GET    /api/advanced-config          # 获取高级配置
-POST   /api/advanced-config          # 保存高级配置
-POST   /api/advanced-config/reset    # 重置为默认配置
-GET    /api/advanced-config/export   # 导出配置
-```
-
-### 版本信息
-
-```http
-GET    /api/version                  # 获取版本信息
-```
-
-## 数据库结构
-
-### proxies 表
-
-```sql
-CREATE TABLE proxies (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL,           -- socks4, socks5, http, https
-  host TEXT NOT NULL,
-  port INTEGER NOT NULL,
-  username TEXT,
-  password TEXT,
-  status TEXT DEFAULT 'unknown', -- active, inactive, testing
-  last_test DATETIME,
-  response_time INTEGER,
-  success_count INTEGER DEFAULT 0,
-  fail_count INTEGER DEFAULT 0,
-  priority INTEGER DEFAULT 999,
-  enabled INTEGER DEFAULT 1,
-  bandwidth_bps INTEGER DEFAULT NULL,
-  bandwidth_test_time DATETIME DEFAULT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### request_logs 表
-
-```sql
-CREATE TABLE request_logs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  proxy_id INTEGER,
-  target_host TEXT,
-  target_port INTEGER,
-  success BOOLEAN,
-  response_time INTEGER,
-  error_message TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE CASCADE
-);
-```
-
-### settings 表
-
-```sql
-CREATE TABLE settings (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-```
-
-### load_stats 表
-
-```sql
-CREATE TABLE load_stats (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  proxy_id INTEGER,
-  weight REAL,
-  success_rate REAL,
-  avg_response_time INTEGER,
-  requests_count INTEGER,
-  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE CASCADE
-);
-```
-
-## 配置参数
-
-### 默认高级配置
-
-```javascript
-const DEFAULT_ADVANCED_CONFIG = {
-  // 基础配置
-  proxy_port: 5678,
-  periodic_test_interval: 5 * 60 * 1000, // 5分钟
-  log_retention_days: 7,
-  stats_retention_days: 30,
-
-  // 连接池配置
-  pool_max_size: 50,
-  pool_idle_timeout: 30000,
-  pool_wait_timeout: 10000,
-
-  // 熔断器配置
-  circuit_failure_threshold: 5,
-  circuit_timeout: 60000,
-  circuit_half_open_attempts: 2,
-
-  // 健康检查配置
-  health_check_interval: 30000,
-  health_degrade_threshold: 0.5,
-  health_recover_threshold: 0.8,
-
-  // 快速失败配置
-  failfast_enabled: true,
-  failfast_max_attempts: 3,
-  failfast_attempt_timeout: 10000,
-  failfast_total_timeout: 30000,
-
-  // 算法权重配置
-  algorithm_weights: {
-    responseTime: 0.3,
-    successRate: 0.25,
-    connections: 0.2,
-    stability: 0.15,
-    recentPerf: 0.1,
-  },
-};
-```
-
-## 部署指南
-
-### 环境要求
-
-- Node.js 14+
-- SQLite3
-- 内存: 512MB+
-- 磁盘: 100MB+
-
-### 安装步骤
+Ubuntu 22.04 示例：
 
 ```bash
-# 1. 安装依赖
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+```
+
+## 安装依赖
+
+```bash
 npm install
+```
 
-# 2. 设置环境变量（可选）
-export PORT=3333
-export PROXY_PORT=5678
-export DATA_DIR=./data
+CI 环境建议使用：
 
-# 3. 启动服务
+```bash
+npm ci
+```
+
+## 开发
+
+启动 Tauri 桌面应用：
+
+```bash
 npm start
 ```
 
-### 环境变量
+等价于：
 
-- `PORT`: Web管理界面端口（默认: 3333）
-- `PROXY_PORT`: 代理服务端口（默认: 5678）
-- `DATA_DIR`: 数据存储目录（默认: ./data）
-
-## 监控和运维
-
-### 关键指标
-
-- **代理可用性**: 活跃代理数量和健康状态
-- **响应时间**: 平均响应时间和响应时间分布
-- **成功率**: 请求成功率和错误率
-- **连接数**: 活跃连接数和连接池状态
-- **熔断器状态**: 各代理的熔断器状态
-
-### 日志管理
-
-- 请求日志自动清理（默认保留7天）
-- 负载统计自动清理（默认保留30天）
-- 支持通过配置调整保留时间
-
-### 性能优化
-
-- 连接池复用减少连接开销
-- 熔断器防止级联故障
-- 智能算法权重动态调整
-- WebSocket实时推送减少轮询
-
-## 故障排除
-
-### 常见问题
-
-1. **代理连接失败**
-   - 检查代理服务器状态
-   - 验证认证信息
-   - 查看熔断器状态
-
-2. **性能问题**
-   - 调整连接池大小
-   - 优化算法权重
-   - 检查网络延迟
-
-3. **内存使用过高**
-   - 减少连接池大小
-   - 调整日志保留时间
-   - 检查连接泄漏
-
-### 调试技巧
-
-- 使用 `/api/stats/circuit-breakers` 查看熔断器状态
-- 通过 `/api/stats/connection-pools` 监控连接池
-
-## 版本管理
-
-### 版本信息模块 (version.js)
-
-系统提供了完整的版本管理功能，支持开发环境和pkg打包环境：
-
-```javascript
-const { getVersion, printVersion } = require("./version");
-
-// 获取版本信息
-const versionInfo = getVersion();
-// 返回对象包含:
-// - version: 版本号（来自package.json）
-// - name: 项目名称
-// - description: 项目描述
-// - author: 作者
-// - buildTime: 构建时间（ISO格式）
-// - environment: 运行环境（development/production）
-// - nodeVersion: Node.js版本
-// - platform: 操作系统平台
-// - arch: CPU架构
-
-// 打印版本信息到控制台
-printVersion();
+```bash
+npm run tauri:dev
 ```
 
-### 版本信息显示
+仅启动前端 Vite 开发服务：
 
-1. **启动时显示**：服务启动时会在控制台打印完整的版本信息
-2. **前端显示**：Web界面左侧边栏底部显示版本号，鼠标悬停可查看详细信息
-3. **API接口**：通过 `/api/version` 获取JSON格式的版本信息
-
-### pkg打包支持
-
-版本信息模块完全支持pkg打包：
-
-- 自动检测运行环境（`process.pkg`）
-- 开发环境从文件系统读取package.json
-- 打包环境从嵌入的快照读取package.json
-- 构建时间自动从可执行文件或package.json获取
-
-### 更新版本号
-
-修改 `package.json` 中的 `version` 字段即可：
-
-```json
-{
-  "version": "1.0.1"
-}
+```bash
+npm run dev
 ```
 
-重新启动或打包后，新版本号会自动生效。
+注意：单独运行 `npm run dev` 只启动前端，仍需要有管理 API 服务在 `3333` 端口运行，否则页面无法读取代理、日志和统计数据。
 
-## 扩展开发
+## 构建
 
-### 添加新算法
+只构建前端：
 
-1. 在 `ProxyLoadBalancer` 类中添加新算法方法
-2. 在 `algorithms` 对象中注册算法
-3. 在应用层的 `validAlgorithms` 数组中添加算法名称
+```bash
+npm run build:web
+```
 
-### 添加新监控指标
+检查 Rust 后端：
 
-1. 在相应的组件中记录数据
-2. 创建新的API端点暴露数据
-3. 在前端添加展示逻辑
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
 
-### 自定义连接处理
+构建桌面安装包：
 
-1. 继承或修改相应的连接方法
-2. 实现自定义的协议处理逻辑
-3. 集成到负载均衡流程中
+```bash
+npm run tauri:build
+```
+
+Windows 构建完成后，产物通常位于：
+
+```text
+src-tauri/target/release/bundle/msi/
+src-tauri/target/release/bundle/nsis/
+```
+
+## 发布工作流
+
+仓库包含 tag 触发的 GitHub Actions workflow：
+
+```text
+.github/workflows/release.yml
+```
+
+触发规则：
+
+```text
+v*
+```
+
+例如推送 `v1.2.3` tag 后，会在 GitHub Actions 中构建：
+
+- Linux x64
+- Windows x64
+- macOS Apple Silicon
+- macOS Intel
+
+workflow 会创建 draft release，并上传 Tauri bundle 和 workflow artifacts。当前提交不会触发发布，只有推送匹配规则的 tag 才会触发。
+
+## 运行端口和配置
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PORT` | `3333` | 管理 API 端口 |
+| `PROXY_PORT` | `5678` | 首次初始化代理服务端口 |
+| `proxy_port` | `5678` | 高级配置中的代理端口，保存于 SQLite |
+| `periodic_test_interval` | `300000` | 定期测试间隔，单位毫秒 |
+| `log_retention_days` | `7` | 请求日志保留天数 |
+| `stats_retention_days` | `30` | 统计数据保留天数 |
+| `pool_max_size` | `50` | 连接池最大连接数 |
+| `circuit_failure_threshold` | `5` | 熔断失败阈值 |
+| `failfast_enabled` | `true` | 是否启用快速失败 |
+
+部分高级配置保存后需要重启应用才能完全生效，尤其是代理服务端口。
+
+## 管理 API
+
+### 代理
+
+```http
+GET    /api/proxies
+POST   /api/proxies
+PUT    /api/proxies/{id}
+DELETE /api/proxies/{id}
+PUT    /api/proxies/{id}/priority
+POST   /api/proxies/{id}/test
+POST   /api/proxies/priorities
+```
+
+### DNS 映射
+
+```http
+GET    /api/dns-mappings
+POST   /api/dns-mappings
+PUT    /api/dns-mappings/{id}
+DELETE /api/dns-mappings/{id}
+PUT    /api/dns-mappings/{id}/toggle
+```
+
+### 代理分组
+
+```http
+GET    /api/proxy-groups
+POST   /api/proxy-groups
+PUT    /api/proxy-groups/{id}
+DELETE /api/proxy-groups/{id}
+```
+
+### 设置和高级配置
+
+```http
+GET  /api/settings
+POST /api/settings
+GET  /api/advanced-config
+POST /api/advanced-config
+POST /api/advanced-config/reset
+GET  /api/advanced-config/export
+GET  /api/test-urls
+```
+
+### 统计和日志
+
+```http
+GET    /api/stats/overview
+GET    /api/stats/hourly
+GET    /api/stats/proxy-usage
+GET    /api/stats/targets
+GET    /api/stats/failed-targets
+GET    /api/stats/circuit-breakers
+GET    /api/stats/connection-pools
+GET    /api/traffic-logs?page=1&page_size=25
+DELETE /api/traffic-logs
+GET    /api/version
+```
+
+### WebSocket
+
+```text
+ws://127.0.0.1:3333/ws
+```
+
+用于推送代理、DNS、分组、测试结果和请求日志变化。
+
+## 数据库
+
+当前版本使用 SQLite。主要表包括：
+
+- `proxies`：代理配置、状态、测试结果和优先级。
+- `settings`：负载算法、运行配置和高级配置。
+- `dns_mappings`：域名到 IP 的映射规则。
+- `proxy_groups`：代理分组。
+- `proxy_group_domains`：分组域名规则。
+- `proxy_group_members`：分组成员代理。
+- `request_logs`：请求流量日志。
+- `load_stats`：负载统计数据。
+
+Rust 后端启动时会自动创建表，并补齐缺失字段。
+
+## 旧 Node.js 入口
+
+旧实现仍保留在 `app.js`、`src/` 和 `public/` 中，用于对照和兼容验证：
+
+```bash
+npm run legacy:start
+npm run legacy:dev
+```
+
+当前推荐入口是 Tauri：
+
+```bash
+npm start
+```
+
+## 质量检查
+
+常用检查命令：
+
+```bash
+npm run build:web
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+完整打包检查：
+
+```bash
+npm run tauri:build
+```
+
+## 许可证
+
+以仓库根目录 `LICENSE` 文件为准。
