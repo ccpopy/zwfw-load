@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react"
 import { Download, Loader2, Network, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
-import { command, type ServiceInfo } from "@/lib/api"
+import { command, commandErrorMessage, type ServiceInfo } from "@/lib/api"
 import type { UpdateInfo, VersionInfo } from "@/types"
 import { Button } from "@/components/ui/button"
 import {
@@ -47,7 +47,7 @@ export function AboutDialog({
         toast.info("当前已是最新版本")
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "检查更新失败")
+      toast.error(commandErrorMessage(error, "检查更新失败"))
     } finally {
       setChecking(false)
     }
@@ -64,7 +64,7 @@ export function AboutDialog({
       toast.success(result.message ?? "已启动更新安装程序")
       onOpenChange(false)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "安装更新失败")
+      toast.error(commandErrorMessage(error, "安装更新失败"))
     } finally {
       setInstalling(false)
     }
@@ -119,7 +119,7 @@ export function AboutDialog({
           <div className="flex flex-col gap-1">
             <div className="text-sm font-medium">检查更新</div>
             <p className="text-xs text-muted-foreground">
-              开发环境禁止检查更新；生产环境从 GitHub Releases 获取更新包。
+              开发环境禁止检查更新；生产环境从 GitHub Releases 获取更新包。私有仓库需要在运行环境中设置 ZWFW_LOAD_GITHUB_TOKEN。
             </p>
           </div>
 

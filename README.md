@@ -192,6 +192,14 @@ sudo dnf install ./zwfw-load_*_x86_64.rpm
 
 更新检查不会默认安装到系统盘其他位置；应用放在 `F:\zwfw-load` 时，更新也会以该目录作为安装位置。
 
+如果发布仓库是私有仓库，GitHub 未认证访问会返回 `404`。生产环境需要在启动应用前设置环境变量：
+
+```powershell
+$env:ZWFW_LOAD_GITHUB_TOKEN = "github_pat_xxx"
+```
+
+Token 需要具备读取私有仓库 Release 的权限。不要把 Token 打包进应用或提交到仓库。
+
 ## 发布工作流
 
 仓库包含 tag 触发的 GitHub Actions workflow：

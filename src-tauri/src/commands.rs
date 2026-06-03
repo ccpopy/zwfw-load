@@ -19,6 +19,10 @@ use crate::{
     version,
 };
 
+const GITHUB_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/ccpopy/zwfw-load/releases/latest";
+const GITHUB_TOKEN_ENV: &str = "ZWFW_LOAD_GITHUB_TOKEN";
+
 type CommandResult<T> = Result<T, CommandError>;
 
 #[derive(Debug, Serialize)]
@@ -579,7 +583,12 @@ pub async fn install_update(artifact_path: Option<String>) -> CommandResult<Valu
     let app_dir = PathBuf::from(&info.app_dir);
     let release_dir = PathBuf::from(&info.release_dir);
     let selected = artifact_path
-        .and_then(|path| info.artifacts.iter().find(|artifact| artifact.path == path).cloned())
+        .and_then(|path| {
+            info.artifacts
+                .iter()
+                .find(|artifact| artifact.path == path)
+                .cloned()
+        })
         .or(info.latest.clone())
         .ok_or_else(|| CommandError::new("没有可安装的更新包"))?;
 
@@ -721,42 +730,70 @@ fn release_dir(app_dir: &Path) -> PathBuf {
 }
 
 async fn fetch_latest_release() -> CommandResult<GithubRelease> {
-    let response = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .user_agent(format!("zwfw-load/{}", version::VERSION))
-        .build()?
-        .get("https://api.github.com/repos/ccpopy/zwfw-load/releases/latest")
+    let client = github_client(Duration::from_secs(20))?;
+    let response = github_get(&client, GITHUB_LATEST_RELEASE_URL)
         .send()
         .await?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(CommandError::new(format!(
-            "GitHub Release 查询失败: HTTP {status}"
-        )));
-    }
+    let response = ensure_github_success(response, "查询").await?;
 
     Ok(response.json().await?)
 }
 
 async fn download_release_asset(download_url: &str, target_path: &Path) -> CommandResult<()> {
-    let response = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .user_agent(format!("zwfw-load/{}", version::VERSION))
-        .build()?
-        .get(download_url)
-        .send()
-        .await?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(CommandError::new(format!(
-            "GitHub Release 下载失败: HTTP {status}"
-        )));
-    }
+    let client = github_client(Duration::from_secs(120))?;
+    let response = github_get(&client, download_url).send().await?;
+    let response = ensure_github_success(response, "下载").await?;
 
     fs::write(target_path, response.bytes().await?)?;
     Ok(())
+}
+
+fn github_client(timeout: Duration) -> CommandResult<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .timeout(timeout)
+        .user_agent(format!("zwfw-load/{}", version::VERSION))
+        .build()?)
+}
+
+fn github_get(client: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    let request = client.get(url);
+    match std::env::var(GITHUB_TOKEN_ENV) {
+        Ok(token) if !token.trim().is_empty() => request.bearer_auth(token.trim().to_string()),
+        _ => request,
+    }
+}
+
+async fn ensure_github_success(
+    response: reqwest::Response,
+    action: &str,
+) -> CommandResult<reqwest::Response> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+
+    let detail = response.text().await.unwrap_or_default();
+    let detail = detail.trim();
+    let detail = if detail.is_empty() {
+        String::new()
+    } else {
+        format!("；GitHub 返回: {detail}")
+    };
+
+    let message = match status {
+        reqwest::StatusCode::UNAUTHORIZED => format!(
+            "GitHub Release {action}失败: HTTP 401。GitHub Token 无效或缺少权限。私有仓库请设置环境变量 {GITHUB_TOKEN_ENV}，并授予读取私有仓库 Release 的 repo 权限{detail}"
+        ),
+        reqwest::StatusCode::FORBIDDEN => format!(
+            "GitHub Release {action}失败: HTTP 403。当前 Token 没有读取 Release 的权限，或触发了 GitHub API 限制{detail}"
+        ),
+        reqwest::StatusCode::NOT_FOUND => format!(
+            "GitHub Release {action}失败: HTTP 404。私有仓库未认证访问时 GitHub 会返回 404；请设置环境变量 {GITHUB_TOKEN_ENV}，或将发布仓库改为公开{detail}"
+        ),
+        _ => format!("GitHub Release {action}失败: HTTP {status}{detail}"),
+    };
+
+    Err(CommandError::new(message))
 }
 
 fn artifact_kind_from_name(file_name: &str) -> Option<&'static str> {

@@ -24,6 +24,21 @@ export async function command<T>(name: string, args?: CommandArgs): Promise<T> {
   return invoke<T>(name, args)
 }
 
+export function commandErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error.trim()) return error
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message.trim()
+  ) {
+    return error.message
+  }
+  return fallback
+}
+
 export function onServerEvent(handler: (message: ServerEvent) => void) {
   ensureTauri()
   return listen<ServerEvent>("server-event", (event) => handler(event.payload))

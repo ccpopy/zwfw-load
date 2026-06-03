@@ -548,11 +548,7 @@ async fn connect_with_fail_fast(
                 runtime.record_breaker_success(proxy.id).await;
                 eprintln!(
                     "代理路由成功: target={}:{}, proxy_id={}, proxy_name={}, proxy_type={}",
-                    request.original_host,
-                    request.port,
-                    proxy.id,
-                    proxy.name,
-                    proxy.proxy_type
+                    request.original_host, request.port, proxy.id, proxy.name, proxy.proxy_type
                 );
                 return Ok((proxy.id, stream));
             }
