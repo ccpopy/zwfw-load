@@ -1,5 +1,4 @@
 use std::{
-    env,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -20,14 +19,12 @@ pub struct AppState {
     pub db: Database,
     pub events: broadcast::Sender<ServerEvent>,
     pub started_at: i64,
-    pub api_port: u16,
     pub proxy_port: u16,
     pub proxy_runtime: Arc<ProxyRuntime>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ServiceInfo {
-    pub api_port: u16,
     pub proxy_port: u16,
     pub database_path: String,
     pub started_at: i64,
@@ -38,10 +35,6 @@ impl AppState {
         let db = Database::open()?;
         let (events, _) = broadcast::channel(256);
         let started_at = now_millis();
-        let api_port = env::var("PORT")
-            .ok()
-            .and_then(|value| value.parse::<u16>().ok())
-            .unwrap_or(3333);
         let advanced = db.load_advanced_config()?;
         let proxy_port = advanced
             .get("proxy_port")
@@ -61,7 +54,6 @@ impl AppState {
             db,
             events,
             started_at,
-            api_port,
             proxy_port,
             proxy_runtime,
         })
@@ -81,7 +73,6 @@ impl AppState {
 
     pub fn service_info(&self) -> ServiceInfo {
         ServiceInfo {
-            api_port: self.api_port,
             proxy_port: self.proxy_port,
             database_path: self.db.path().display().to_string(),
             started_at: self.started_at,

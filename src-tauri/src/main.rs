@@ -1,4 +1,4 @@
-mod api;
+mod commands;
 mod database;
 mod models;
 mod proxy;
@@ -9,7 +9,7 @@ mod version;
 use std::sync::Arc;
 
 use state::{AppState, ServiceInfo};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[tauri::command]
 fn get_service_info(state: tauri::State<'_, Arc<AppState>>) -> ServiceInfo {
@@ -25,15 +25,63 @@ pub fn run() {
             let managed_state = app_state.clone();
             app.manage(managed_state);
 
+            let app_handle = app.handle().clone();
+            let mut events = app_state.events.subscribe();
             tauri::async_runtime::spawn(async move {
-                if let Err(error) = api::serve(app_state.clone()).await {
-                    eprintln!("管理 API 启动失败: {error:#}");
+                loop {
+                    match events.recv().await {
+                        Ok(event) => {
+                            if let Err(error) = app_handle.emit("server-event", event) {
+                                eprintln!("应用事件发送失败: {error:#}");
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
                 }
             });
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_service_info])
+        .invoke_handler(tauri::generate_handler![
+            get_service_info,
+            commands::list_proxies,
+            commands::get_proxy,
+            commands::create_proxy,
+            commands::update_proxy,
+            commands::delete_proxy,
+            commands::update_proxy_priority,
+            commands::update_proxy_priorities,
+            commands::test_proxy,
+            commands::list_proxy_groups,
+            commands::create_proxy_group,
+            commands::update_proxy_group,
+            commands::delete_proxy_group,
+            commands::get_settings,
+            commands::save_settings,
+            commands::get_advanced_config,
+            commands::save_advanced_config,
+            commands::reset_advanced_config,
+            commands::export_config,
+            commands::stats_overview,
+            commands::stats_hourly,
+            commands::stats_proxy_usage,
+            commands::stats_targets,
+            commands::stats_failed_targets,
+            commands::stats_circuit_breakers,
+            commands::stats_connection_pools,
+            commands::list_dns_mappings,
+            commands::create_dns_mapping,
+            commands::update_dns_mapping,
+            commands::delete_dns_mapping,
+            commands::toggle_dns_mapping,
+            commands::test_urls,
+            commands::traffic_logs,
+            commands::clear_traffic_logs,
+            commands::version_info,
+            commands::check_for_updates,
+            commands::install_update
+        ])
         .run(tauri::generate_context!())
         .expect("Tauri 应用启动失败");
 }

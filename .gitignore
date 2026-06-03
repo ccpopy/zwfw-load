@@ -164,6 +164,8 @@ src-tauri/gen/
 
 # Frontend build artifacts
 web/dist/
+release/*
+!release/.gitkeep
 
 # Local automation artifacts
 .playwright-cli/

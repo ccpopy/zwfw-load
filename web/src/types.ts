@@ -121,6 +121,23 @@ export interface VersionInfo {
   arch?: string
 }
 
+export interface UpdateArtifact {
+  fileName: string
+  path: string
+  version: string
+  kind: string
+  isNewer: boolean
+}
+
+export interface UpdateInfo {
+  currentVersion: string
+  appDir: string
+  releaseDir: string
+  hasUpdate: boolean
+  latest?: UpdateArtifact | null
+  artifacts: UpdateArtifact[]
+}
+
 export interface AdvancedConfig {
   proxy_port: number
   periodic_test_interval: number

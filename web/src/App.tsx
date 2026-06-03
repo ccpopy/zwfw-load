@@ -39,7 +39,15 @@ import {
 } from "recharts"
 import { toast } from "sonner"
 
-import { api, getApiBase, getWsUrl, initApiBase, jsonBody } from "@/lib/api"
+import {
+  api,
+  command,
+  initServiceInfo,
+  jsonBody,
+  onServerEvent,
+  type ServerEvent,
+  type ServiceInfo,
+} from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
   AdvancedConfig,
@@ -51,6 +59,7 @@ import type {
   ProxyUsageStat,
   TargetStat,
   TrafficLogPage,
+  UpdateInfo,
   VersionInfo,
 } from "@/types"
 import { Badge } from "@/components/ui/badge"
@@ -203,7 +212,7 @@ export function App() {
   const [connectionState, setConnectionState] = useState<
     "online" | "offline" | "connecting"
   >("connecting")
-  const [apiBase, setApiBase] = useState(getApiBase())
+  const [serviceInfo, setServiceInfo] = useState<ServiceInfo | null>(null)
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem("zwfw-theme")
     if (stored === "dark" || stored === "light") return stored
@@ -226,6 +235,9 @@ export function App() {
     totalPages: 1,
   })
   const [version, setVersion] = useState<VersionInfo | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [updateOpen, setUpdateOpen] = useState(false)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [proxyDialog, setProxyDialog] = useState<ProxyRecord | "new" | null>(null)
   const [dnsDialog, setDnsDialog] = useState<DnsMapping | "new" | null>(null)
   const [groupDialog, setGroupDialog] = useState<ProxyGroup | "new" | null>(null)
@@ -281,10 +293,10 @@ export function App() {
 
   useEffect(() => {
     let closed = false
-    initApiBase()
-      .then(async (base) => {
+    initServiceInfo()
+      .then(async (info) => {
         if (closed) return
-        setApiBase(base)
+        setServiceInfo(info)
         await Promise.all([refresh(), loadTrafficLogs(1, INITIAL_TRAFFIC_PAGE_SIZE)])
       })
       .catch((error) => toast.error(error.message))
@@ -300,53 +312,55 @@ export function App() {
   }, [loadTrafficLogs, refresh])
 
   useEffect(() => {
-    let reconnectTimer: number | undefined
-    let ws: WebSocket | null = null
-
     if (!apiReady) return undefined
 
-    const connect = () => {
-      setConnectionState("connecting")
-      ws = new WebSocket(getWsUrl())
-      ws.onopen = () => setConnectionState("online")
-      ws.onmessage = (event) => {
-        const message = JSON.parse(event.data) as { type: string; data?: unknown }
-        if (
-          [
-            "proxy_created",
-            "proxy_updated",
-            "proxy_deleted",
-            "proxy_tested",
-            "dns_mapping_added",
-            "dns_mapping_updated",
-            "dns_mapping_deleted",
-            "dns_mapping_toggled",
-            "proxy_group_created",
-            "proxy_group_updated",
-            "proxy_group_deleted",
-            "traffic_logs_cleared",
-            "request_logged",
-          ].includes(message.type)
-        ) {
-          Promise.all([
-            refresh(),
-            loadTrafficLogs(trafficLogs.page, trafficLogs.pageSize),
-          ]).catch((error) => toast.error(error.message))
+    let closed = false
+    let unlisten: (() => void) | undefined
+    setConnectionState("connecting")
+    onServerEvent((message: ServerEvent) => {
+      if (
+        [
+          "proxy_created",
+          "proxy_updated",
+          "proxy_deleted",
+          "proxy_tested",
+          "dns_mapping_added",
+          "dns_mapping_updated",
+          "dns_mapping_deleted",
+          "dns_mapping_toggled",
+          "proxy_group_created",
+          "proxy_group_updated",
+          "proxy_group_deleted",
+          "traffic_logs_cleared",
+          "request_logged",
+        ].includes(message.type)
+      ) {
+        Promise.all([
+          refresh(),
+          loadTrafficLogs(trafficLogs.page, trafficLogs.pageSize),
+        ]).catch((error) => toast.error(error.message))
+      }
+    })
+      .then((dispose) => {
+        if (closed) {
+          dispose()
+          return
         }
-      }
-      ws.onclose = () => {
-        setConnectionState("offline")
-        reconnectTimer = window.setTimeout(connect, 3000)
-      }
-      ws.onerror = () => setConnectionState("offline")
-    }
+        unlisten = dispose
+        setConnectionState("online")
+      })
+      .catch((error) => {
+        if (!closed) {
+          setConnectionState("offline")
+          toast.error(error.message)
+        }
+      })
 
-    connect()
     return () => {
-      if (reconnectTimer) window.clearTimeout(reconnectTimer)
-      ws?.close()
+      closed = true
+      unlisten?.()
     }
-  }, [apiBase, apiReady, loadTrafficLogs, refresh, trafficLogs.page, trafficLogs.pageSize])
+  }, [apiReady, loadTrafficLogs, refresh, trafficLogs.page, trafficLogs.pageSize])
 
   const currentTitle = navItems.find((item) => item.key === section)?.label ?? "代理配置"
   const activeCount = proxies.filter((proxy) => proxy.enabled === 1 && proxy.status === "active").length
@@ -361,6 +375,24 @@ export function App() {
       toast.error(error instanceof Error ? error.message : "刷新失败")
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleCheckUpdate() {
+    setCheckingUpdate(true)
+    try {
+      const info = await command<UpdateInfo>("check_for_updates")
+      setUpdateInfo(info)
+      setUpdateOpen(true)
+      if (info.hasUpdate) {
+        toast.success(`发现新版本 ${info.latest?.version}`)
+      } else {
+        toast.info("当前已是最新版本")
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "检查更新失败")
+    } finally {
+      setCheckingUpdate(false)
     }
   }
 
@@ -446,13 +478,27 @@ export function App() {
               <h1 className="truncate text-lg font-semibold">{currentTitle}</h1>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <ConnectionBadge state={connectionState} />
-                <span className="truncate">{apiBase}</span>
+                <span className="truncate">Tauri 本地应用通信</span>
               </div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Badge variant="secondary">端口 {advanced.proxy_port}</Badge>
+            <Badge variant="secondary">
+              代理端口 {serviceInfo?.proxy_port ?? advanced.proxy_port}
+            </Badge>
             <Badge variant="outline">v{version?.version ?? "..."}</Badge>
+            <Button
+              variant="outline"
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+            >
+              {checkingUpdate ? (
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Download data-icon="inline-start" />
+              )}
+              检查更新
+            </Button>
             <Button variant="outline" onClick={handleRefresh} disabled={loading}>
               {loading ? (
                 <Loader2 data-icon="inline-start" className="animate-spin" />
@@ -547,6 +593,11 @@ export function App() {
           await refresh()
         }}
       />
+      <UpdateDialog
+        open={updateOpen}
+        info={updateInfo}
+        onOpenChange={setUpdateOpen}
+      />
       <AdvancedDialog
         open={advancedOpen}
         config={advanced}
@@ -556,6 +607,97 @@ export function App() {
       />
       <Toaster />
     </SidebarProvider>
+  )
+}
+
+function UpdateDialog({
+  open,
+  info,
+  onOpenChange,
+}: {
+  open: boolean
+  info: UpdateInfo | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const [installing, setInstalling] = useState(false)
+
+  async function handleInstall() {
+    if (!info?.latest) return
+
+    setInstalling(true)
+    try {
+      const result = await command<{ message?: string }>("install_update", {
+        artifactPath: info.latest.path,
+      })
+      toast.success(result.message ?? "已启动更新安装程序")
+      onOpenChange(false)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "安装更新失败")
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>检查更新</DialogTitle>
+          <DialogDescription>
+            开发环境扫描项目根目录 release，生产环境扫描应用所在目录 release。
+          </DialogDescription>
+        </DialogHeader>
+
+        {info ? (
+          <FieldGroup>
+            <Field>
+              <FieldLabel>当前版本</FieldLabel>
+              <FieldDescription>{info.currentVersion}</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel>安装目录</FieldLabel>
+              <FieldDescription className="break-all">{info.appDir}</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel>更新包目录</FieldLabel>
+              <FieldDescription className="break-all">{info.releaseDir}</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel>更新状态</FieldLabel>
+              <FieldDescription>
+                {info.hasUpdate && info.latest
+                  ? `发现新版本 ${info.latest.version}`
+                  : "未发现高于当前版本的更新包"}
+              </FieldDescription>
+            </Field>
+            {info.latest && (
+              <Field>
+                <FieldLabel>候选更新包</FieldLabel>
+                <FieldDescription className="break-all">
+                  {info.latest.fileName}
+                </FieldDescription>
+              </Field>
+            )}
+          </FieldGroup>
+        ) : (
+          <p className="text-sm text-muted-foreground">尚未执行更新检查。</p>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+          <Button onClick={handleInstall} disabled={!info?.latest || installing}>
+            {installing ? (
+              <Loader2 data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <Download data-icon="inline-start" />
+            )}
+            安装更新
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

@@ -22,11 +22,9 @@ pub struct Database {
 
 impl Database {
     pub fn open() -> Result<Self> {
-        let data_dir = env::var("DATA_DIR").map(PathBuf::from).unwrap_or_else(|_| {
-            env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join("data")
-        });
+        let data_dir = env::var("DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| default_data_dir());
         fs::create_dir_all(&data_dir)
             .with_context(|| format!("创建数据目录失败: {}", data_dir.display()))?;
 
@@ -822,6 +820,22 @@ impl Database {
             "uptime": uptime
         }))
     }
+}
+
+fn default_data_dir() -> PathBuf {
+    if cfg!(debug_assertions) {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+            .join("data");
+    }
+
+    env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(PathBuf::from))
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .join("data")
 }
 
 fn add_column_if_missing(
