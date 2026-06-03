@@ -72,6 +72,8 @@ import {
 } from "@/components/ui/table"
 import { EmptyState } from "@/components/common/empty-state"
 
+const rankingChartMargin = { top: 8, right: 12, bottom: 32, left: 0 } as const
+
 export function StatusSection({
   overview,
   hourlyStats,
@@ -164,10 +166,21 @@ export function StatusSection({
         </ChartCard>
 
         <ChartCard title="代理使用排行" description="最近24小时代理请求数">
-          <ChartContainer config={barChartConfig} className="h-64 w-full">
-            <BarChart data={usageData}>
+          <ChartContainer config={barChartConfig} className="h-72 w-full">
+            <BarChart data={usageData} margin={rankingChartMargin}>
               <CartesianGrid vertical={false} />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} tickFormatter={(value) => truncateLabel(value)} />
+              <XAxis
+                dataKey="name"
+                tickLine={false}
+                axisLine={false}
+                interval={0}
+                height={60}
+                tickMargin={10}
+                angle={-28}
+                textAnchor="end"
+                tick={{ fontSize: 11 }}
+                tickFormatter={(value) => truncateLabel(String(value), 6)}
+              />
               <YAxis tickLine={false} axisLine={false} width={36} />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="requests" fill="var(--color-requests)" radius={4} />
@@ -176,10 +189,21 @@ export function StatusSection({
         </ChartCard>
 
         <ChartCard title="目标资源排行" description="最近24小时目标主机请求数">
-          <ChartContainer config={barChartConfig} className="h-64 w-full">
-            <BarChart data={targetData}>
+          <ChartContainer config={barChartConfig} className="h-72 w-full">
+            <BarChart data={targetData} margin={rankingChartMargin}>
               <CartesianGrid vertical={false} />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} tickFormatter={(value) => truncateLabel(value)} />
+              <XAxis
+                dataKey="name"
+                tickLine={false}
+                axisLine={false}
+                interval={0}
+                height={60}
+                tickMargin={10}
+                angle={-28}
+                textAnchor="end"
+                tick={{ fontSize: 11 }}
+                tickFormatter={(value) => truncateLabel(String(value), 10)}
+              />
               <YAxis tickLine={false} axisLine={false} width={36} />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="requests" fill="var(--color-requests)" radius={4} />

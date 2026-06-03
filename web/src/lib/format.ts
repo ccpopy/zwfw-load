@@ -27,8 +27,8 @@ export function formatDuration(seconds: number) {
   return `${minutes}分`
 }
 
-export function truncateLabel(value: string) {
-  return value.length > 8 ? `${value.slice(0, 8)}…` : value
+export function truncateLabel(value: string, maxLength = 8) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value
 }
 
 export function paginationPages(page: number, totalPages: number) {
