@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
-    net::{lookup_host, TcpListener, TcpStream},
+    net::{TcpListener, TcpStream},
     sync::{broadcast, Mutex, RwLock},
     time::{sleep, timeout, Duration},
 };
@@ -635,7 +635,6 @@ async fn connect_socks5(proxy: &ProxyRecord, request: &TargetRequest) -> Result<
 }
 
 async fn connect_socks4(proxy: &ProxyRecord, request: &TargetRequest) -> Result<TcpStream> {
-    let target_ip = resolve_ipv4(&request.host, request.port).await?;
     let mut stream = TcpStream::connect((proxy.host.as_str(), proxy.port as u16)).await?;
     let mut packet = vec![
         0x04,
@@ -643,8 +642,21 @@ async fn connect_socks4(proxy: &ProxyRecord, request: &TargetRequest) -> Result<
         (request.port >> 8) as u8,
         (request.port & 0xff) as u8,
     ];
-    packet.extend_from_slice(&target_ip.octets());
-    packet.push(0x00);
+    if let Ok(target_ip) = request.host.parse::<Ipv4Addr>() {
+        packet.extend_from_slice(&target_ip.octets());
+        packet.push(0x00);
+    } else {
+        if request.host.contains(':') {
+            return Err(anyhow!("SOCKS4a暂不支持IPv6地址"));
+        }
+        if request.host.len() > 255 {
+            return Err(anyhow!("SOCKS4a目标域名过长"));
+        }
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        packet.push(0x00);
+        packet.extend_from_slice(request.host.as_bytes());
+        packet.push(0x00);
+    }
     stream.write_all(&packet).await?;
     let mut response = [0u8; 8];
     stream.read_exact(&mut response).await?;
@@ -994,19 +1006,6 @@ fn address_type(host: &str) -> Result<u8> {
         return Err(anyhow!("暂不支持IPv6地址"));
     }
     Ok(ADDR_DOMAIN)
-}
-
-async fn resolve_ipv4(host: &str, port: u16) -> Result<Ipv4Addr> {
-    if let Ok(ip) = host.parse::<Ipv4Addr>() {
-        return Ok(ip);
-    }
-    let mut addrs = lookup_host((host, port)).await?;
-    addrs
-        .find_map(|addr| match addr {
-            SocketAddr::V4(addr) => Some(*addr.ip()),
-            SocketAddr::V6(_) => None,
-        })
-        .ok_or_else(|| anyhow!("目标域名没有IPv4解析结果: {host}"))
 }
 
 fn score_of(proxy: &ProxyRecord) -> f64 {

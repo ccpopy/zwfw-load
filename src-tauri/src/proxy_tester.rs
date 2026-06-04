@@ -52,7 +52,7 @@ fn build_proxy_url(proxy: &ProxyRecord) -> Result<Url> {
     let scheme = match proxy.proxy_type.as_str() {
         "http" => "http",
         "https" => "https",
-        "socks4" => "socks4",
+        "socks4" => "socks4a",
         "socks5" => "socks5h",
         other => return Err(anyhow!("不支持的代理类型: {other}")),
     };

@@ -93,7 +93,7 @@ export function AboutDialog({
           </div>
 
           <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-            {version?.runtime && <Meta label="运行时" value={version.runtime} />}
+            {version?.runtime && <Meta label="技术栈" value={version.runtime} />}
             {version?.platform && (
               <Meta label="系统" value={version.platform} />
             )}

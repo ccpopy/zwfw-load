@@ -91,6 +91,8 @@ jobs:
             - 统一手动测试和自动健康检查的后端逻辑，测试结果会同步更新代理状态、响应时间和健康日志。
             - 保存高级设置时校验定期测试间隔，避免无效周期进入运行配置。
             - 完善 macOS 随包数据迁移说明，明确从下载目录复制 proxy.db、proxy.db-shm 和 proxy.db-wal。
+            - 将关于弹窗中的“运行时”标签调整为“技术栈”。
+            - 将界面中的 SOCKS4 配置按 SOCKS4a 方式测试和转发，目标域名交给上游代理解析。
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           assetNamePattern: zwfw-load_${{ steps.package-version.outputs.version }}_[platform]_[arch][setup][ext]
