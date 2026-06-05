@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input"
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
@@ -285,30 +286,37 @@ function TestUrlCombobox({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <div className="flex gap-2">
-        <Input
-          value={value}
-          onFocus={() => setOpen(true)}
-          onChange={(event) => {
-            onChange(event.target.value)
-            setOpen(true)
-          }}
-          placeholder="https://example.com"
-        />
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label="选择已保存测试地址"
-          >
-            <ChevronsUpDown />
-          </Button>
-        </PopoverTrigger>
-      </div>
+      <PopoverAnchor asChild>
+        <div className="relative w-full">
+          <Input
+            role="combobox"
+            aria-expanded={open}
+            value={value}
+            onFocus={() => setOpen(true)}
+            onChange={(event) => {
+              onChange(event.target.value)
+              setOpen(true)
+            }}
+            className="pr-10 font-mono text-xs"
+            placeholder="https://example.com"
+          />
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute top-1/2 right-1 size-7 -translate-y-1/2 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="选择已保存测试地址"
+            >
+              <ChevronsUpDown />
+            </Button>
+          </PopoverTrigger>
+        </div>
+      </PopoverAnchor>
       <PopoverContent
         align="start"
-        className="w-[min(36rem,calc(100vw-3rem))] p-0"
+        side="bottom"
+        className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-3rem)] p-0"
       >
         <Command shouldFilter={false}>
           <CommandList>

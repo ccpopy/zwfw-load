@@ -83,16 +83,24 @@ jobs:
           releaseBody: |
             ## Changes
 
-            - 精简关于弹窗的更新区域，移除冗余说明、路径明细和状态明细。
-            - 将关于弹窗中的运行信息标签改为中文展示，提升界面一致性。
-            - 修复 Windows 便携版更新文件名，直接使用 GitHub Release 原始 portable exe 文件名，不再生成 .update.exe。
-            - 修复 Windows 便携版更新后无法直接启动新版本的问题。
-            - 新增已启用代理的启动探测和定期健康检查，代理恢复可用后会自动刷新在线状态。
-            - 统一手动测试和自动健康检查的后端逻辑，测试结果会同步更新代理状态、响应时间和健康日志。
-            - 保存高级设置时校验定期测试间隔，避免无效周期进入运行配置。
-            - 完善 macOS 随包数据迁移说明，明确从下载目录复制 proxy.db、proxy.db-shm 和 proxy.db-wal。
-            - 将关于弹窗中的“运行时”标签调整为“技术栈”。
-            - 将界面中的 SOCKS4 配置按 SOCKS4a 方式测试和转发，目标域名交给上游代理解析。
+            ### 新增
+
+            - 重新设计应用图标，采用更接近 macOS/iOS 主流应用图标的圆角渐变、玻璃层次和简洁分流符号。
+            - 同步生成 Windows、macOS、Linux、iOS 和 Android 所需的 Tauri 图标资源。
+
+            ### 调整
+
+            - 优化输入框和下拉选择框的 hover/focus 视觉状态，减少突兀阴影和背景跳变。
+            - 将代理编辑弹窗的测试地址选择入口整合进输入框内部，交互形态更接近标准 combobox。
+            - 统一前端包、Rust 后端、Tauri 配置和发布产物命名使用日期版本 `2026.6.5`。
+
+            ### 修复
+
+            - 修复代理编辑弹窗中测试地址候选列表偏离输入框的问题，下拉现在从输入框正下方展开并与输入框等宽。
+
+            ### 文档
+
+            - 更新 README 中 Windows portable、Windows 安装包和 macOS dmg 的示例文件名。
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           assetNamePattern: zwfw-load_${{ steps.package-version.outputs.version }}_[platform]_[arch][setup][ext]
