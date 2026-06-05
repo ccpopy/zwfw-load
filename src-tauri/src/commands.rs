@@ -862,22 +862,68 @@ impl VersionParts {
             });
         let core = version.split_once('-').map_or(version, |(core, _)| core);
         let mut parts = core.split('.');
-        let major = parts.next()?.parse().ok()?;
+        let raw_major: u64 = parts.next()?.parse().ok()?;
         let minor = parts.next()?.parse().ok()?;
-        let patch = parts.next()?.parse().ok()?;
+        let raw_patch: u64 = parts.next()?.parse().ok()?;
         if parts.next().is_some() {
             return None;
         }
-        let revision = match metadata {
+        let metadata_revision = match metadata {
             Some(value) => value.parse().ok()?,
             None => 0,
         };
+
+        let major = if raw_major >= 2000 {
+            raw_major - 2000
+        } else {
+            raw_major
+        };
+        let (patch, encoded_revision) = if major < 100 && raw_patch >= 100 {
+            (raw_patch / 100, raw_patch % 100)
+        } else {
+            (raw_patch, 0)
+        };
+        let revision = if metadata.is_some() {
+            metadata_revision
+        } else {
+            encoded_revision
+        };
+
         Some(Self {
             major,
             minor,
             patch,
             revision,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VersionParts;
+
+    #[test]
+    fn compares_legacy_date_versions_with_windows_safe_versions() {
+        let legacy = VersionParts::parse("2026.6.5").unwrap();
+        let current = VersionParts::parse("26.6.501").unwrap();
+
+        assert!(current > legacy);
+    }
+
+    #[test]
+    fn keeps_same_day_versions_equal_without_revision() {
+        assert_eq!(
+            VersionParts::parse("2026.6.5").unwrap(),
+            VersionParts::parse("26.6.5").unwrap()
+        );
+    }
+
+    #[test]
+    fn treats_semver_metadata_as_same_day_revision() {
+        assert_eq!(
+            VersionParts::parse("2026.6.5+1").unwrap(),
+            VersionParts::parse("26.6.501").unwrap()
+        );
     }
 }
 
