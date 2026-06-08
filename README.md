@@ -142,7 +142,7 @@ release/
 Windows 本地构建还会额外复制一个可直接运行的便携 exe：
 
 ```text
-release/zwfw-load_26.6.501_x64-portable.exe
+release/zwfw-load_26.6.8_x64-portable.exe
 ```
 
 这个文件主要用于本机验证，可以直接双击运行；正式更新安装仍建议使用 setup 或 msi 安装包。
@@ -153,14 +153,14 @@ release/zwfw-load_26.6.501_x64-portable.exe
 
 Windows：
 
-- 便携运行：下载 `zwfw-load_26.6.501_x64-portable.exe`，放到目标目录后直接双击运行。
-- 安装运行：下载 Windows x64 的 `setup.exe` 或 `.msi` 安装包，按安装向导完成安装。GitHub Release 文件名会使用 `zwfw-load_26.6.501_windows_*` 前缀。
+- 便携运行：下载 `zwfw-load_26.6.8_x64-portable.exe`，放到目标目录后直接双击运行。
+- 安装运行：下载 Windows x64 的 `setup.exe` 或 `.msi` 安装包，按安装向导完成安装。GitHub Release 文件名会使用 `zwfw-load_26.6.8_windows_*` 前缀。
 - 启动后应用会监听默认代理端口 `5678`，浏览器或系统代理可配置为 `SOCKS5 127.0.0.1:5678` 或 `HTTP 127.0.0.1:5678`。
 
 macOS：
 
-- Intel 芯片下载 `zwfw-load_26.6.501_darwin_x64.dmg`。
-- Apple Silicon 芯片下载 `zwfw-load_26.6.501_darwin_aarch64.dmg`。
+- Intel 芯片下载 `zwfw-load_26.6.8_darwin_x64.dmg`。
+- Apple Silicon 芯片下载 `zwfw-load_26.6.8_darwin_aarch64.dmg`。
 - `.app.tar.gz` 是同架构的应用包压缩产物，通常优先使用 `.dmg` 安装。
 - 打开 `.dmg` 后把应用拖入 `Applications`。未签名构建首次打开时可能需要在系统设置的“隐私与安全性”中允许打开。
 - 启动后代理端口同样默认为 `5678`，可在系统网络代理或浏览器代理中配置 `127.0.0.1:5678`。
@@ -190,15 +190,14 @@ sudo dnf install ./zwfw-load_*_x86_64.rpm
 
 ## 数据目录和随包配置
 
-应用会把 SQLite 数据库写入稳定的用户数据目录，避免应用移动、安装或拖入 `Applications` 后读取不到原来的配置。`DATA_DIR` 环境变量仍可强制指定数据目录。
+应用会把 SQLite 数据库写入平台默认数据目录。Windows 发布版默认使用应用目录下的 `data`，方便安装版和便携版随包读取配置；macOS 和 Linux 默认使用系统约定的用户数据目录。`DATA_DIR` 环境变量仍可强制指定数据目录。
 
 默认数据目录：
 
 | 平台 | 默认位置 |
 | --- | --- |
 | 开发环境 | 项目根目录 `data` |
-| Windows 便携版 | exe 所在目录的 `data` |
-| Windows 安装版 | `%APPDATA%\zwfw-load` |
+| Windows 发布版（安装版和便携版） | exe 所在目录的 `data` |
 | macOS | `~/Library/Application Support/zwfw-load` |
 | Linux | `$XDG_DATA_HOME/zwfw-load`，未设置时使用 `~/.local/share/zwfw-load` |
 
@@ -240,7 +239,7 @@ cp "$SOURCE_DATA"/proxy.db* "$TARGET_DATA"/
 
 应用内显示的“更新目标目录”和“下载保存目录”都会指向当前应用所在目录。比如便携 exe 放在 `F:\project\zwfw-load\release` 中运行时，更新也会下载到 `F:\project\zwfw-load\release`，不会再放到 `F:\project\zwfw-load\release\release`。
 
-便携 exe 在运行时不能直接覆盖自身，所以更新时会直接下载 GitHub Release 中的新版本文件名，例如 `zwfw-load_26.6.501_x64-portable.exe`，然后退出当前应用并启动这个新版本文件。
+便携 exe 在运行时不能直接覆盖自身，所以更新时会直接下载 GitHub Release 中的新版本文件名，例如 `zwfw-load_26.6.8_x64-portable.exe`，然后退出当前应用并启动这个新版本文件。
 
 如果发布仓库是私有仓库，GitHub 未认证访问会返回 `404`。生产环境需要在启动应用前设置环境变量：
 

@@ -904,8 +904,8 @@ mod tests {
 
     #[test]
     fn compares_legacy_date_versions_with_windows_safe_versions() {
-        let legacy = VersionParts::parse("2026.6.5").unwrap();
-        let current = VersionParts::parse("26.6.501").unwrap();
+        let legacy = VersionParts::parse("2026.6.8").unwrap();
+        let current = VersionParts::parse("26.6.801").unwrap();
 
         assert!(current > legacy);
     }
@@ -921,8 +921,8 @@ mod tests {
     #[test]
     fn treats_semver_metadata_as_same_day_revision() {
         assert_eq!(
-            VersionParts::parse("2026.6.5+1").unwrap(),
-            VersionParts::parse("26.6.501").unwrap()
+            VersionParts::parse("2026.6.8+1").unwrap(),
+            VersionParts::parse("26.6.801").unwrap()
         );
     }
 }

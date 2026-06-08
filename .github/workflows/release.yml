@@ -9,7 +9,7 @@ on:
       release_tag:
         description: "Release tag to upload assets to"
         required: true
-        default: "v26.6.501"
+        default: "v26.06.08"
       target:
         description: "Build target"
         required: true
@@ -130,7 +130,7 @@ jobs:
 
             - 优化输入框和下拉选择框的 hover/focus 视觉状态，减少突兀阴影和背景跳变。
             - 将代理编辑弹窗的测试地址选择入口整合进输入框内部，交互形态更接近标准 combobox。
-            - 发布包版本、产物命名和 Windows 安装包内部应用版本统一使用 `26.6.501`。
+            - 发布包版本、产物命名和 Windows 安装包内部应用版本统一使用 `26.6.8`。
 
             ### 修复
 

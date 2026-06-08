@@ -844,7 +844,7 @@ fn default_data_dir() -> Result<PathBuf> {
             .join("data"));
     }
 
-    if is_windows_portable()? {
+    if cfg!(target_os = "windows") {
         return Ok(current_exe_dir()?.join("data"));
     }
 
@@ -852,12 +852,6 @@ fn default_data_dir() -> Result<PathBuf> {
 }
 
 fn platform_data_dir() -> Result<PathBuf> {
-    if cfg!(target_os = "windows") {
-        return env::var("APPDATA")
-            .map(|value| PathBuf::from(value).join("zwfw-load"))
-            .with_context(|| "无法确定 Windows 用户数据目录，缺少 APPDATA 环境变量");
-    }
-
     if cfg!(target_os = "macos") {
         return env::var("HOME")
             .map(|value| {
@@ -884,19 +878,6 @@ fn platform_data_dir() -> Result<PathBuf> {
     }
 
     current_exe_dir().map(|path| path.join("data"))
-}
-
-fn is_windows_portable() -> Result<bool> {
-    if !cfg!(target_os = "windows") {
-        return Ok(false);
-    }
-
-    let file_name = env::current_exe()?
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    Ok(file_name.contains("portable"))
 }
 
 fn current_exe_dir() -> Result<PathBuf> {
