@@ -9,7 +9,7 @@ on:
       release_tag:
         description: "Release tag to upload assets to"
         required: true
-        default: "v26.06.10"
+        default: "v26.6.1001"
       target:
         description: "Build target"
         required: true
@@ -129,7 +129,7 @@ jobs:
             ### 调整
 
             - 移除高级设置中的配置导出入口，统一放到侧边栏导入导出页面。
-            - 发布包版本、产物命名和 Windows 安装包内部应用版本统一使用 `26.6.10`。
+            - 发布包版本、产物命名和 Windows 安装包内部应用版本统一使用 `26.6.1001`。
 
             ### 修复
 

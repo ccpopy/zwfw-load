@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { cn } from "@/lib/utils"
 
 export function TransferSection({
   proxies,
@@ -120,7 +121,7 @@ export function TransferSection({
           <Accordion
             type="multiple"
             defaultValue={["proxies", "dns", "groups"]}
-            className="overflow-hidden rounded-md border"
+            className="flex flex-col gap-3"
           >
             <SelectGroup
               value="proxies"
@@ -261,9 +262,12 @@ function SelectGroup({
   }
 
   return (
-    <AccordionItem value={value}>
+    <AccordionItem
+      value={value}
+      className="overflow-hidden rounded-md border bg-background shadow-[0_1px_2px_0_oklch(0_0_0/0.03)] last:border-b"
+    >
       {/* 全选框是手风琴触发器的兄弟节点：按钮不能嵌套按钮，且勾选不应折叠面板 */}
-      <div className="flex items-center gap-2.5 px-3 transition-colors hover:bg-muted/30">
+      <div className="flex items-center gap-2.5 bg-muted/20 px-3 transition-colors hover:bg-muted/35">
         <Checkbox
           checked={headerState}
           onCheckedChange={toggleAll}
@@ -276,9 +280,10 @@ function SelectGroup({
             {title}
           </span>
           <span
-            className={`ml-auto font-mono text-xs tabular-nums ${
+            className={cn(
+              "ml-auto rounded-sm bg-background px-2 py-0.5 font-mono text-xs tabular-nums",
               selected.size > 0 ? "text-primary" : "text-muted-foreground"
-            }`}
+            )}
           >
             {selected.size}/{rows.length}
           </span>

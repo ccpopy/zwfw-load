@@ -1154,8 +1154,8 @@ mod tests {
     #[test]
     fn extracts_tag_from_mirror_location_header() {
         assert_eq!(
-            extract_release_tag("/https://github.com/ccpopy/proxy-load/releases/tag/v26.06.10"),
-            Some("v26.06.10".to_string())
+            extract_release_tag("/https://github.com/ccpopy/proxy-load/releases/tag/v26.6.1001"),
+            Some("v26.6.1001".to_string())
         );
         assert_eq!(
             extract_release_tag("https://github.com/ccpopy/proxy-load/releases/tag/v1.2.3?x=1"),
@@ -1170,15 +1170,15 @@ mod tests {
     #[test]
     fn extracts_asset_names_from_expanded_assets_html() {
         let html = r#"
-            <a href="/ccpopy/proxy-load/releases/download/v26.06.10/proxy-load_26.6.10_windows_x64-setup.exe">a</a>
-            <a href="/ccpopy/proxy-load/releases/download/v26.06.10/proxy-load_26.6.10_windows_x64-setup.exe">dup</a>
-            <a href="/ccpopy/proxy-load/releases/download/v26.06.10/proxy-load_26.6.10_x64-portable.exe">b</a>
+            <a href="/ccpopy/proxy-load/releases/download/v26.6.1001/proxy-load_26.6.1001_windows_x64-setup.exe">a</a>
+            <a href="/ccpopy/proxy-load/releases/download/v26.6.1001/proxy-load_26.6.1001_windows_x64-setup.exe">dup</a>
+            <a href="/ccpopy/proxy-load/releases/download/v26.6.1001/proxy-load_26.6.1001_x64-portable.exe">b</a>
         "#;
         assert_eq!(
-            extract_release_asset_names(html, "v26.06.10"),
+            extract_release_asset_names(html, "v26.6.1001"),
             vec![
-                "proxy-load_26.6.10_windows_x64-setup.exe".to_string(),
-                "proxy-load_26.6.10_x64-portable.exe".to_string()
+                "proxy-load_26.6.1001_windows_x64-setup.exe".to_string(),
+                "proxy-load_26.6.1001_x64-portable.exe".to_string()
             ]
         );
     }
