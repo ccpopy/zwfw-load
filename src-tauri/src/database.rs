@@ -466,6 +466,9 @@ impl Database {
                 members: group
                     .members
                     .into_iter()
+                    // 成员跟随代理勾选：未勾选的代理连地址引用都不写入导出文件，
+                    // 因此分组允许导出为空成员（仅保留域名规则）
+                    .filter(|member| proxy_ids.contains(&member.proxy_id))
                     .map(|member| BundleGroupMember {
                         name: member.name,
                         proxy_type: member.proxy_type,
@@ -1408,4 +1411,73 @@ fn domain_matches(host: &str, pattern: &str) -> bool {
         return host == suffix || host.ends_with(&format!(".{suffix}"));
     }
     host == pattern
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Database;
+    use crate::models::{ProxyGroupInput, ProxyInput};
+
+    fn proxy_input(name: &str, host: &str, port: i64) -> ProxyInput {
+        ProxyInput {
+            name: name.to_string(),
+            proxy_type: "socks5".to_string(),
+            host: host.to_string(),
+            port,
+            username: None,
+            password: None,
+            enabled: Some(1),
+            test_url: None,
+            test_timeout: None,
+            skip_cert_verify: None,
+        }
+    }
+
+    #[test]
+    fn export_bundle_filters_group_members_by_selected_proxies() {
+        let data_dir =
+            std::env::temp_dir().join(format!("proxy-load-db-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::env::set_var("DATA_DIR", &data_dir);
+        let db = Database::open().expect("打开测试数据库");
+
+        let kept = db
+            .create_proxy(proxy_input("已勾选", "10.0.0.1", 1080))
+            .unwrap();
+        let dropped = db
+            .create_proxy(proxy_input("未勾选", "10.0.0.2", 1080))
+            .unwrap();
+        let group = db
+            .create_proxy_group(ProxyGroupInput {
+                name: Some("测试分组".to_string()),
+                domains: Some(vec!["*.example.com".to_string()]),
+                proxy_ids: Some(vec![kept.id, dropped.id]),
+                is_default: Some(0),
+                enabled: Some(1),
+            })
+            .unwrap();
+
+        // 只勾选其中一个代理：分组成员必须同步剔除未勾选代理，连地址引用也不能出现
+        let bundle = db.export_bundle(&[kept.id], &[], &[group.id]).unwrap();
+        assert_eq!(bundle.proxies.len(), 1);
+        assert_eq!(bundle.proxy_groups.len(), 1);
+        let members = &bundle.proxy_groups[0].members;
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].host, kept.host);
+        assert!(!serde_json::to_string(&bundle)
+            .unwrap()
+            .contains(&dropped.host));
+
+        // 一个代理都不勾选：允许导出仅含域名规则的空成员分组
+        let bundle = db.export_bundle(&[], &[], &[group.id]).unwrap();
+        assert!(bundle.proxies.is_empty());
+        assert_eq!(bundle.proxy_groups.len(), 1);
+        assert!(bundle.proxy_groups[0].members.is_empty());
+        assert_eq!(
+            bundle.proxy_groups[0].domains,
+            vec!["*.example.com".to_string()]
+        );
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
 }

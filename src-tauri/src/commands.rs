@@ -1133,6 +1133,9 @@ mod tests {
         assert!(
             VersionParts::parse("26.6.1001").unwrap() > VersionParts::parse("26.6.10").unwrap()
         );
+        assert!(
+            VersionParts::parse("26.6.1002").unwrap() > VersionParts::parse("26.6.1001").unwrap()
+        );
     }
 
     #[test]
@@ -1149,13 +1152,17 @@ mod tests {
             VersionParts::parse("2026.6.10+1").unwrap(),
             VersionParts::parse("26.6.1001").unwrap()
         );
+        assert_eq!(
+            VersionParts::parse("2026.6.10+2").unwrap(),
+            VersionParts::parse("26.6.1002").unwrap()
+        );
     }
 
     #[test]
     fn extracts_tag_from_mirror_location_header() {
         assert_eq!(
-            extract_release_tag("/https://github.com/ccpopy/proxy-load/releases/tag/v26.6.1001"),
-            Some("v26.6.1001".to_string())
+            extract_release_tag("/https://github.com/ccpopy/proxy-load/releases/tag/v26.6.1002"),
+            Some("v26.6.1002".to_string())
         );
         assert_eq!(
             extract_release_tag("https://github.com/ccpopy/proxy-load/releases/tag/v1.2.3?x=1"),
@@ -1170,15 +1177,15 @@ mod tests {
     #[test]
     fn extracts_asset_names_from_expanded_assets_html() {
         let html = r#"
-            <a href="/ccpopy/proxy-load/releases/download/v26.6.1001/proxy-load_26.6.1001_windows_x64-setup.exe">a</a>
-            <a href="/ccpopy/proxy-load/releases/download/v26.6.1001/proxy-load_26.6.1001_windows_x64-setup.exe">dup</a>
-            <a href="/ccpopy/proxy-load/releases/download/v26.6.1001/proxy-load_26.6.1001_x64-portable.exe">b</a>
+            <a href="/ccpopy/proxy-load/releases/download/v26.6.1002/proxy-load_26.6.1002_windows_x64-setup.exe">a</a>
+            <a href="/ccpopy/proxy-load/releases/download/v26.6.1002/proxy-load_26.6.1002_windows_x64-setup.exe">dup</a>
+            <a href="/ccpopy/proxy-load/releases/download/v26.6.1002/proxy-load_26.6.1002_x64-portable.exe">b</a>
         "#;
         assert_eq!(
-            extract_release_asset_names(html, "v26.6.1001"),
+            extract_release_asset_names(html, "v26.6.1002"),
             vec![
-                "proxy-load_26.6.1001_windows_x64-setup.exe".to_string(),
-                "proxy-load_26.6.1001_x64-portable.exe".to_string()
+                "proxy-load_26.6.1002_windows_x64-setup.exe".to_string(),
+                "proxy-load_26.6.1002_x64-portable.exe".to_string()
             ]
         );
     }

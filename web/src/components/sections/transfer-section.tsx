@@ -156,16 +156,25 @@ export function TransferSection({
               emptyText="暂无代理分组"
               selected={selectedGroups}
               onSelectedChange={setSelectedGroups}
-              rows={groups.map((group) => ({
-                id: group.id,
-                primary: group.name,
-                secondary: `${group.domains.length} 个域名 · ${group.members.length} 个代理`,
-              }))}
+              rows={groups.map((group) => {
+                const exportable = group.members.filter((member) =>
+                  selectedProxies.has(member.proxy_id)
+                ).length
+                return {
+                  id: group.id,
+                  primary: group.name,
+                  secondary:
+                    group.members.length === 0
+                      ? `${group.domains.length} 个域名 · 无成员`
+                      : `${group.domains.length} 个域名 · 导出成员 ${exportable}/${group.members.length}`,
+                }
+              })}
             />
           </Accordion>
           <p className="text-xs text-muted-foreground">
-            分组成员按「类型 + 主机 + 端口」关联代理：导出分组时建议同时勾选其成员代理，
-            导入端缺失的成员会被自动跳过。
+            分组成员跟随「代理列表」的勾选动态过滤：未勾选的代理不会写入导出文件，
+            分组中对应成员也会被剔除，允许导出仅含域名规则的空成员分组；
+            导入端按「类型 + 主机 + 端口」重新关联成员。
           </p>
         </CardContent>
       </Card>
